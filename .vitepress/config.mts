@@ -2,6 +2,25 @@ import { defineConfig } from "vitepress";
 
 export default defineConfig({
   srcDir: "content",
+  markdown: {
+    config(md) {
+      const defaultFence = md.renderer.rules.fence;
+
+      md.renderer.rules.fence = (tokens, index, options, env, self) => {
+        const token = tokens[index];
+        const language = token.info.trim().split(/\s+/, 1)[0];
+
+        if (language === "mermaid") {
+          const code = JSON.stringify(token.content).replaceAll("'", "&#39;");
+          return `<MermaidDiagram :code='${code}' />`;
+        }
+
+        return defaultFence
+          ? defaultFence(tokens, index, options, env, self)
+          : self.renderToken(tokens, index, options);
+      };
+    },
+  },
 
   title: "Data Engineering Docs",
   description:
@@ -64,22 +83,12 @@ export default defineConfig({
               text: "Multidimensional aggregation",
               link: "/sql/multidimensional-aggregation",
             },
+            {
+              text: "Database storage engine internals",
+              link: "/sql/database-storage-engine-internals",
+            },
           ],
         },
-        // {
-        //   text: "Database Internals",
-        //   items: [
-        //     {
-        //       text: "Storage Engine & Page Storage",
-        //       link: "/sql/storage-engine",
-        //     },
-        //     {
-        //       text: "Indexing Internals (B-Trees, Hash)",
-        //       link: "/sql/indexing",
-        //     },
-        //     { text: "Query Execution Engine", link: "/sql/query-optimization" },
-        //   ],
-        // },
       ],
 
       //   "/modeling/": [

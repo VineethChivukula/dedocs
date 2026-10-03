@@ -13,6 +13,7 @@ computing, data pipelines, system design, and algorithms.
   key takeaways.
 - A tabular syllabus for the Absolute Data Engineering interview preparation
   programme.
+- Mermaid diagrams rendered from `mermaid` code fences.
 - Local full-text search powered by VitePress.
 - Light and dark themes with project-specific styling.
 - Vale and Google style checks for Markdown documentation.
@@ -80,6 +81,7 @@ then add them to the navigation or sidebar when appropriate.
 ## Writing content
 
 Use Markdown headings, fenced code blocks, tables, and links consistently.
+Use `mermaid` code fences for diagrams that should render in the published site.
 SQL examples should include enough context to explain the expected result.
 For longer pages, use the existing structure where it fits:
 

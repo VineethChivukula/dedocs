@@ -1,6 +1,7 @@
 {
   "devDependencies": {
     "@iconify-json/ic": "^1.2.4",
+    "mermaid": "^12.1.0",
     "vitepress": "^2.0.0-alpha.20",
     "vue": "^3.5.43"
   },
