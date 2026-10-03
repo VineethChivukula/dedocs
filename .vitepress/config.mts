@@ -60,6 +60,10 @@ export default defineConfig({
               text: "Recursive queries and graph traversals",
               link: "/sql/recursive-queries-and-graph-traversals",
             },
+            {
+              text: "Multidimensional aggregation",
+              link: "/sql/multidimensional-aggregation",
+            },
           ],
         },
         // {
