@@ -10,7 +10,10 @@ export default defineConfig({
   themeConfig: {
     siteTitle: "DE Docs",
     logo: "/logo.svg",
-    nav: [{ text: "Syllabus", link: "/syllabus" }],
+    nav: [
+      { text: "SQL", link: "/sql/relational-model-concepts" },
+      { text: "Syllabus", link: "/syllabus" },
+    ],
 
     sidebar: {
       "/sql/": [
@@ -48,6 +51,10 @@ export default defineConfig({
             {
               text: "Value and frame navigation",
               link: "/sql/value-and-frame-navigation",
+            },
+            {
+              text: "Common table expressions",
+              link: "/sql/common-table-expressions",
             },
           ],
         },
