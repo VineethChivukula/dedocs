@@ -45,6 +45,10 @@ export default defineConfig({
               text: "Analytical and window functions",
               link: "/sql/analytical-and-window-functions",
             },
+            {
+              text: "Value and frame navigation",
+              link: "/sql/value-and-frame-navigation",
+            },
           ],
         },
         // {
