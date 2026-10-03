@@ -56,6 +56,10 @@ export default defineConfig({
               text: "Common table expressions",
               link: "/sql/common-table-expressions",
             },
+            {
+              text: "Recursive queries and graph traversals",
+              link: "/sql/recursive-queries-and-graph-traversals",
+            },
           ],
         },
         // {
