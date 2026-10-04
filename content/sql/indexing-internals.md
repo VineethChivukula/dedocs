@@ -265,7 +265,7 @@ rather than for every possible column combination.
 This table describes common properties. Always verify the implementation and
 optimizer behavior for your database engine.
 
-## Practical example
+## Complete example
 
 The following schema illustrates a primary key, a unique secondary index, and
 a covering index. The database engine determines whether the primary key uses

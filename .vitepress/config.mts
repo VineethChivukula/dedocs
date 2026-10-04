@@ -91,6 +91,10 @@ export default defineConfig({
               text: "Indexing internals",
               link: "/sql/indexing-internals",
             },
+            {
+              text: "Query execution engine",
+              link: "/sql/query-execution-engine",
+            },
           ],
         },
       ],
