@@ -95,6 +95,10 @@ export default defineConfig({
               text: "Query execution engine",
               link: "/sql/query-execution-engine",
             },
+            {
+              text: "Advanced query optimization",
+              link: "/sql/advanced-query-optimization",
+            },
           ],
         },
       ],
