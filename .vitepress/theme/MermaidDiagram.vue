@@ -11,6 +11,18 @@ let mermaid: typeof import("mermaid").default | undefined;
 let observer: MutationObserver | undefined;
 let renderQueue: Promise<void> = Promise.resolve();
 
+function addSvgBottomPadding(svg: SVGSVGElement) {
+  const viewBox = svg.getAttribute("viewBox")?.trim().split(/\s+/).map(Number);
+
+  if (!viewBox || viewBox.length !== 4 || viewBox.some(Number.isNaN)) {
+    return;
+  }
+
+  const bottomPadding = 12;
+  viewBox[3] += bottomPadding;
+  svg.setAttribute("viewBox", viewBox.join(" "));
+}
+
 function renderDiagram() {
   renderQueue = renderQueue.then(async () => {
     if (!container.value) {
@@ -21,6 +33,7 @@ function renderDiagram() {
 
     try {
       mermaid ??= (await import("mermaid")).default;
+      await document.fonts.ready;
       const styles = getComputedStyle(document.documentElement);
       const themeVariables = {
         background: styles.getPropertyValue("--vp-c-bg").trim(),
@@ -45,7 +58,8 @@ function renderDiagram() {
         securityLevel: "strict",
         theme: "base",
         flowchart: {
-          htmlLabels: true,
+          htmlLabels: false,
+          padding: 16,
           useMaxWidth: true,
           wrappingWidth: 320,
         },
@@ -57,6 +71,10 @@ function renderDiagram() {
         .slice(2)}`;
       const { svg } = await mermaid.render(id, props.code);
       container.value.innerHTML = svg;
+      const renderedSvg = container.value.querySelector("svg");
+      if (renderedSvg) {
+        addSvgBottomPadding(renderedSvg);
+      }
     } catch (error) {
       errorMessage.value =
         error instanceof Error
@@ -96,6 +114,8 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <style scoped>
 .mermaid-diagram {
+  display: flex;
+  justify-content: center;
   margin: 1.5rem 0;
   overflow-x: auto;
   text-align: center;
@@ -104,10 +124,32 @@ onBeforeUnmount(() => observer?.disconnect());
 .mermaid-diagram :deep(svg) {
   height: auto;
   max-width: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+.mermaid-diagram :deep(foreignObject) {
+  overflow: visible;
+}
+
+.mermaid-diagram :deep(foreignObject p) {
+  margin: 0;
+  padding-bottom: 0.2em;
+}
+
+.mermaid-diagram :deep(.node rect),
+.mermaid-diagram :deep(.cluster rect),
+.mermaid-diagram :deep(.label-container) {
+  filter: none !important;
 }
 
 .mermaid-diagram__error {
   color: var(--vp-c-danger-1);
   text-align: left;
+}
+
+.mermaid-diagram svg {
+  display: block !important;
+  margin: 0 auto !important;
 }
 </style>

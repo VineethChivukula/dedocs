@@ -87,6 +87,10 @@ export default defineConfig({
               text: "Database storage engine internals",
               link: "/sql/database-storage-engine-internals",
             },
+            {
+              text: "Indexing internals",
+              link: "/sql/indexing-internals",
+            },
           ],
         },
       ],

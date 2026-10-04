@@ -24,6 +24,9 @@ The storage engine moves pages between durable storage and memory. It records
 changes in the write-ahead log before it writes modified data pages back to the heap file.
 
 ```mermaid
+---
+title: Storage engine architecture
+---
 graph TD
     Client[Application / SQL Client]:::external
 
@@ -113,6 +116,9 @@ places a new row on a page with enough free space instead of maintaining a
 sorted order.
 
 ```mermaid
+---
+title: Heap file architecture
+---
 graph TD
 subgraph HeapFile ["Heap File on Disk"]
         direction TB
@@ -169,6 +175,9 @@ and columns that can be null. A slotted page uses an array of row pointers so th
 the row data can move within the page without changing the row's logical slot.
 
 ```mermaid
+---
+title: Slotted page architecture
+---
 graph TD
     subgraph Page ["Slotted Page (Fixed Size, e.g., 8 KB)"]
         direction TB
@@ -298,6 +307,9 @@ WHERE EmployeeID = 101;
 The storage path is conceptually:
 
 ```mermaid
+---
+title: Update execution flow
+---
 flowchart LR
     A[UPDATE request] --> B[Locate page for Employee 101]
     B --> C{Page in buffer pool?}
