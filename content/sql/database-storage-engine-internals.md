@@ -119,40 +119,59 @@ sorted order.
 ---
 title: Heap file architecture
 ---
-graph TD
-subgraph HeapFile ["Heap File on Disk"]
+flowchart TD
+    %% Write path (Insert)
+    InsertOp["INSERT Request<br/>(Requires 2 KB space)"]
+
+    subgraph HeapFile ["Heap File on Disk"]
         direction TB
 
-        subgraph Directory ["Page Directory"]
-            Dir["Directory Header<br/>(Tracks free space per page)"]
+        subgraph Directory ["Page Directory / Free-Space Map"]
+            direction LR
+            Dir1["Directory Entry 1<br/>Page 1 | Free: 0 KB (Full)"]
+            Dir2["Directory Entry 2<br/>Page 2 | Free: 4 KB (Available)"]
+            Dir3["Directory Entry 3<br/>Page 3 | Free: 8 KB (Empty)"]
         end
 
-        subgraph DataPages ["Unordered Data Pages"]
+        subgraph DataPages ["Unordered Data Pages (Fixed 8 KB Pages)"]
             direction LR
 
-            subgraph Page1 ["Page ID: 1 (Full)"]
-                P1_Row1["Slot 0: Record A"]
-                P1_Row2["Slot 1: Record B"]
+            subgraph Page1 ["Page 1 (Full)"]
+                direction TB
+                P1_H["Page Header (ID: 1)"]
+                P1_S0["Slot 0: Record A"]
+                P1_S1["Slot 1: Record B"]
             end
 
-            subgraph Page2 ["Page ID: 2 (Has Space)"]
-                P2_Row1["Slot 0: Record C"]
-                P2_Free["[ Available Free Space ]"]
+            subgraph Page2 ["Page 2 (Has Space)"]
+                direction TB
+                P2_H["Page Header (ID: 2)"]
+                P2_S0["Slot 0: Record C"]
+                P2_Free["[ 4 KB Free Space ]"]
             end
 
-            subgraph Page3 ["Page ID: 3 (Empty)"]
-                P3_Free["[ Available Free Space ]"]
+            subgraph Page3 ["Page 3 (Empty)"]
+                direction TB
+                P3_H["Page Header (ID: 3)"]
+                P3_Free["[ 8 KB Free Space ]"]
             end
         end
     end
 
-    %% Page Directory Tracking
-    Dir -->|"Page 1: 0 KB Free"| Page1
-    Dir -->|"Page 2: 4 KB Free"| Page2
-    Dir -->|"Page 3: 8 KB Free"| Page3
+    %% Read path (Index Lookup via Row ID)
+    IndexLookup["Secondary Index Entry<br/>Row ID: (Page 2, Slot 0)"]
 
-    %% Secondary Index Reference Example
-    IndexEntry["Secondary Index Pointer<br/>Row ID: (Page 2, Slot 0)"] -.-> P2_Row1
+    %% Directory tracking (file offsets to page headers)
+    Dir1 -->|"File Offset"| P1_H
+    Dir2 -->|"File Offset"| P2_H
+    Dir3 -->|"File Offset"| P3_H
+
+    %% Write path: check directory for space, then append
+    InsertOp -->|"1. Consult directory for free space"| Dir2
+    Dir2 -.->|"2. Place into free space"| P2_Free
+
+    %% Read path: direct pointer lookup to target slot
+    IndexLookup ==>|"Direct pointer lookup"| P2_S0
 ```
 
 The engine maintains a free-space map or page directory to find pages that
@@ -178,35 +197,43 @@ the row data can move within the page without changing the row's logical slot.
 ---
 title: Slotted page architecture
 ---
-graph TD
-    subgraph Page ["Slotted Page (Fixed Size, e.g., 8 KB)"]
+flowchart TD
+    %% External caller / index
+    subgraph Lookup ["Logical Row ID Lookup"]
+        RowID["Secondary Index Entry<br/>Row ID: (Page 2, Slot 1)<br/><i>Stable logical reference</i>"]
+    end
+
+    %% Slotted Page Container
+    subgraph Page ["Slotted Page: Page 2 (Fixed 8 KB Block)"]
         direction TB
 
-        subgraph Header ["1. Page Header"]
-            H_Info["Page ID: 2 | LSN: 1042 | Slot Count: 2 | Free Space Boundary"]
+        subgraph Header ["1. Page Header (Byte 0)"]
+            H["Metadata: Page ID = 2 | LSN = 1042 | Slot Count = 2<br/>Free Space Bounds: Lower = Byte 72 | Upper = Byte 7880"]
         end
 
-        subgraph Slots ["2. Slot Array (Grows Downward ↓)"]
-            Slot0["Slot 0 Pointer<br/>(Offset: Byte 8000, Length: 120B)"]
-            Slot1["Slot 1 Pointer<br/>(Offset: Byte 7880, Length: 90B)"]
+        subgraph Slots ["2. Slot Array / Directory (Grows Downward ↓)"]
+            direction LR
+            Slot0["Slot 0<br/>Offset: 8000 | Len: 120B"]
+            Slot1["Slot 1<br/>Offset: 7880 | Len: 90B"]
         end
 
-        subgraph Gap ["3. Free-Space Gap"]
-            Free["[ Unallocated Empty Space ]"]
+        subgraph FreeSpace ["3. Contiguous Free-Space Gap"]
+            Gap["[ Unallocated Free Space: Bytes 72 to 7879 ]<br/>New slots allocate downward ↓ | New records allocate upward ↑<br/><i>(Page is full when Lower Pointer meets Upper Pointer)</i>"]
         end
 
-        subgraph Payloads ["4. Record Payloads (Grows Upward ↑)"]
-            Rec1["Record 1 Payload<br/>(Starts at Byte 7880)"]
-            Rec0["Record 0 Payload<br/>(Starts at Byte 8000)"]
+        subgraph Payloads ["4. Record Payloads (Grows Upward from End of Page ↑)"]
+            direction LR
+            Rec0["Record 0 Payload<br/>Bytes 8000..8119 (120B)"]
+            Rec1["Record 1 Payload<br/>Bytes 7880..7969 (90B)"]
         end
     end
 
-    %% External Reference
-    RowID["External Row ID Pointer<br/>(Page 2, Slot 1)"] ==>|"Points to Slot Number"| Slot1
+    %% Indirection Lookup Flow
+    RowID ==>|"Step 1: Locate stable slot entry"| Slot1
+    Slot1 ==>|"Step 2: Follow byte offset to payload"| Rec1
 
-    %% Internal Slot Pointers
-    Slot0 -->|"Offset Points to Start Byte"| Rec0
-    Slot1 -->|"Offset Points to Start Byte"| Rec1
+    %% Secondary slot mapping
+    Slot0 -.->|"Offset: 8000"| Rec0
 ```
 
 A slotted page contains:
@@ -310,19 +337,27 @@ The storage path is conceptually:
 ---
 title: Update execution flow
 ---
-flowchart LR
-    A[UPDATE request] --> B[Locate page for Employee 101]
-    B --> C{Page in buffer pool?}
-    C -- Yes --> D[Pin buffer frame]
-    C -- No --> E[Read page from heap file]
-    E --> D
-    D --> F[Append write-ahead log record]
-    F --> G[Flush log to durable storage]
-    G --> H[Update row in memory]
-    H --> I[Set page log sequence number and dirty bit]
-    I --> J[Acknowledge commit]
-    J --> K[Background checkpoint]
-    K --> L[Write dirty page to heap file]
+flowchart TD
+    Req["UPDATE Request<br/>(EmployeeID = 101, Salary = 95000)"]
+    Req --> Step1["1. Locate page for Employee 101"]
+    Step1 --> Check{"Page in buffer pool?"}
+
+    Check -- "Yes (Cache hit)" --> Pin["Pin buffer frame"]
+    Check -- "No (Cache miss)" --> ReadDisk["2. Read page from heap file into frame"]
+    ReadDisk --> Pin
+
+    subgraph FastPath ["Fast Durability Path (Write-Ahead Logging)"]
+        direction TB
+        Pin --> Step3["3. Append log record to WAL buffer"]
+        Step3 --> Step4["4. Flush WAL log to durable storage"]
+        Step4 --> Step5["5. Update row in memory & mark frame dirty (set page LSN)"]
+        Step5 --> Step6["6. Acknowledge commit to client"]
+    end
+
+    subgraph AsyncPath ["Asynchronous Background Persistence"]
+        direction TB
+        Step6 -.->|"Deferred background write"| Step7["7. Checkpoint / Background writer writes dirty page to heap file"]
+    end
 ```
 
 The steps are:

@@ -21,25 +21,30 @@ An abstract B-tree looks like this:
 
 ```mermaid
 ---
-title: B tree representation
+title: B-tree representation
 ---
-graph TD
-    %% Root Node storing Keys AND Data Pointers
-    Root["<b>[ Key 100 (Data) | Key 300 (Data) ]</b><br/><i>Root Page</i>"]:::root
+flowchart TD
+    Root["Root Page (Internal Node)<br/>[ P0 | Key 100 (Data) | P1 | Key 300 (Data) | P2 ]"]
 
-    %% Leaf Nodes storing non-overlapping Keys and Data
-    Leaf1["<b>[ Key 10 (Data) .. Key 99 (Data) ]</b><br/><i>Leaf Page 1</i>"]:::leaf
-    Leaf2["<b>[ Key 101 (Data) .. Key 299 (Data) ]</b><br/><i>Leaf Page 2</i>"]:::leaf
-    Leaf3["<b>[ Key 301 (Data) .. Key 500 (Data) ]</b><br/><i>Leaf Page 3</i>"]:::leaf
+    Leaf1["Leaf Page 1<br/>Keys 10 .. 99 (Data)"]
+    Leaf2["Leaf Page 2<br/>Keys 101 .. 299 (Data)"]
+    Leaf3["Leaf Page 3<br/>Keys 301 .. 500 (Data)"]
 
-    %% Parent to Child Routing (Strict Inequalities)
-    Root --> Leaf1
-    Root --> Leaf2
-    Root --> Leaf3
+    Root -->|"P0: Keys 10 .. 99"| Leaf1
+    Root -->|"P1: Keys 101 .. 299"| Leaf2
+    Root -->|"P2: Keys 301 .. 500"| Leaf3
 ```
 
-The database follows key ranges from the root toward a leaf page. Balanced
-depth keeps point searches and range scans efficient as the index grows.
+In a B-tree page:
+
+- **Pointer P0** precedes Key 100 and points to child records with keys less than 100: `Keys < 100`.
+- **Key 100 with Data** stores the key and its corresponding table row data directly in the root page. If a point lookup searches for `Key = 100`, the search terminates immediately at the root without descending to a leaf.
+- **Pointer P1** sits in the middle between Key 100 and Key 300, pointing to child records with keys strictly between them: `100 < Keys < 300`.
+- **Key 300 with Data** stores the key and its row data directly in the root page.
+- **Pointer P2** follows Key 300 and points to child records with keys greater than 300: `Keys > 300`.
+
+Because leaf pages in a standard B-tree aren't linked to each other, range
+queries require an in-order traversal that navigates up and down tree levels.
 
 B-trees support common predicates such as:
 
@@ -61,31 +66,23 @@ in key order, which supports sequential range scans.
 ```mermaid
 ---
 title: B+ tree representation
-config:
-  layout: elk
 ---
-graph TD
-    %% Root Node
-    Root["<b>[ Key 100 | Key 300 ]</b><br/><i>Root Page</i>"]
+flowchart TD
+    Root["Root Page (Internal Router)<br/>[ P0 | Key 100 | P1 | Key 300 | P2 ]"]
 
-    %% Leaf nodes defined inside an LR subgraph
-    subgraph LeafLevel [" "]
+    subgraph LeafLevel ["Leaf Pages (Linked for Sequential Range Scans)"]
         direction LR
-        Leaf1["<b>[ Key 10 (Data) .. Key 100 (Data) ]</b><br/><i>Leaf Page 1</i>"]
-        Leaf2["<b>[ Key 101 (Data) .. Key 300 (Data) ]</b><br/><i>Leaf Page 2</i>"]
-        Leaf3["<b>[ Key 301 (Data) .. Key 500 (Data) ]</b><br/><i>Leaf Page 3</i>"]
+        Leaf1["Leaf Page 1<br/>Keys 10 .. 100 (Data)"]
+        Leaf2["Leaf Page 2<br/>Keys 101 .. 300 (Data)"]
+        Leaf3["Leaf Page 3<br/>Keys 301 .. 500 (Data)"]
 
-        %% Single bidirectional links for sequential scan
-        Leaf1 <--> Leaf2 <--> Leaf3
+        Leaf1 <===>|"Sequential scan"| Leaf2
+        Leaf2 <===>|"Sequential scan"| Leaf3
     end
 
-    %% Parent-to-child routing
-    Root --> Leaf1
-    Root --> Leaf2
-    Root --> Leaf3
-
-    %% Make subgraph wrapper invisible
-    style LeafLevel fill:none,stroke:none;
+    Root -->|"P0: Keys 10 .. 100"| Leaf1
+    Root -->|"P1: Keys 101 .. 300"| Leaf2
+    Root -->|"P2: Keys 301 .. 500"| Leaf3
 ```
 
 Many relational database engines use a B+ tree or a similar balanced-tree
