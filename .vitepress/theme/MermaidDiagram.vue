@@ -51,6 +51,16 @@ function renderDiagram() {
         clusterBorder: styles.getPropertyValue("--vp-c-divider").trim(),
         edgeLabelBackground: styles.getPropertyValue("--vp-c-bg").trim(),
         fontFamily: styles.getPropertyValue("--vp-font-family-base").trim(),
+        darkMode: document.documentElement.classList.contains("dark"),
+        textColor: styles.getPropertyValue("--vp-c-text-1").trim(),
+        nodeTextColor: styles.getPropertyValue("--vp-c-text-1").trim(),
+        mainBkg: styles.getPropertyValue("--vp-c-bg-soft").trim(),
+        nodeBorder: styles.getPropertyValue("--vp-c-divider").trim(),
+        rowOdd: styles.getPropertyValue("--vp-c-bg-alt").trim(),
+        rowEven: styles.getPropertyValue("--vp-c-bg-soft").trim(),
+        attributeBackgroundColorOdd: styles.getPropertyValue("--vp-c-bg-alt").trim(),
+        attributeBackgroundColorEven: styles.getPropertyValue("--vp-c-bg-soft").trim(),
+        dropShadow: "none",
       };
 
       mermaid.initialize({
@@ -63,6 +73,9 @@ function renderDiagram() {
           useMaxWidth: true,
           wrappingWidth: 320,
         },
+        er: {
+          useMaxWidth: true,
+        },
         themeVariables,
       });
 
@@ -73,6 +86,8 @@ function renderDiagram() {
       container.value.innerHTML = svg;
       const renderedSvg = container.value.querySelector("svg");
       if (renderedSvg) {
+        renderedSvg.querySelectorAll("feDropShadow, filter[id*='drop-shadow']").forEach((el) => el.remove());
+        renderedSvg.querySelectorAll("[filter]").forEach((el) => el.removeAttribute("filter"));
         addSvgBottomPadding(renderedSvg);
       }
     } catch (error) {
@@ -137,10 +152,53 @@ onBeforeUnmount(() => observer?.disconnect());
   padding-bottom: 0.2em;
 }
 
-.mermaid-diagram :deep(.node rect),
-.mermaid-diagram :deep(.cluster rect),
+.mermaid-diagram :deep(*),
+.mermaid-diagram :deep(svg *),
+.mermaid-diagram :deep(.node *),
+.mermaid-diagram :deep(.cluster *),
+.mermaid-diagram :deep(.outer-path),
 .mermaid-diagram :deep(.label-container) {
   filter: none !important;
+  box-shadow: none !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .row-rect-odd path),
+.mermaid-diagram :deep(.erDiagram .row-rect-odd rect) {
+  fill: var(--vp-c-bg-alt) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .row-rect-even path),
+.mermaid-diagram :deep(.erDiagram .row-rect-even rect) {
+  fill: var(--vp-c-bg-soft) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .nodeLabel),
+.mermaid-diagram :deep(.erDiagram .nodeLabel p),
+.mermaid-diagram :deep(.erDiagram .nodeLabel span) {
+  color: var(--vp-c-text-1) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .entityBox),
+.mermaid-diagram :deep(.erDiagram .node .outer-path) {
+  fill: var(--vp-c-bg-soft) !important;
+  stroke: var(--vp-c-divider) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .divider path) {
+  stroke: var(--vp-c-divider) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .relationshipLine) {
+  stroke: var(--vp-c-brand-1) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .marker) {
+  stroke: var(--vp-c-brand-1) !important;
+}
+
+.mermaid-diagram :deep(.erDiagram .edgeLabel text),
+.mermaid-diagram :deep(.erDiagram .edgeLabel tspan) {
+  fill: var(--vp-c-text-1) !important;
 }
 
 .mermaid-diagram__error {

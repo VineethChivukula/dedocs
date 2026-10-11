@@ -31,6 +31,7 @@ export default defineConfig({
     logo: "/logo.svg",
     nav: [
       { text: "SQL", link: "/sql/relational-model-concepts" },
+      { text: "Modeling", link: "/modeling/data-modeling-fundamentals" },
       { text: "Syllabus", link: "/syllabus" },
     ],
 
@@ -103,14 +104,14 @@ export default defineConfig({
         },
       ],
 
-      //   "/modeling/": [
-      //     {
-      //       text: "Data Modeling Fundamentals",
-      //       items: [
-      //         {
-      //           text: "ER Diagrams & Normalization",
-      //           link: "/modeling/er-normalization",
-      //         },
+        "/modeling/": [
+          {
+            text: "Modeling",
+            items: [
+              {
+                text: "Data modeling fundamentals",
+                link: "/modeling/data-modeling-fundamentals",
+              },
       //         {
       //           text: "Dimensional Modeling (Kimball vs Inmon)",
       //           link: "/modeling/dimensional-modeling",
@@ -129,9 +130,9 @@ export default defineConfig({
       //           link: "/modeling/scd-patterns",
       //         },
       //         { text: "Lakehouse Architectures", link: "/modeling/lakehouse" },
-      //       ],
-      //     },
-      //   ],
+            ],
+          },
+        ],
 
       //   "/spark/": [
       //     {
