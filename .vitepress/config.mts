@@ -112,6 +112,10 @@ export default defineConfig({
                 text: "Data modeling fundamentals",
                 link: "/modeling/data-modeling-fundamentals",
               },
+              {
+                text: "Entities, attributes, and relationships",
+                link: "/modeling/entities-attributes-and-relationships",
+              },
       //         {
       //           text: "Dimensional Modeling (Kimball vs Inmon)",
       //           link: "/modeling/dimensional-modeling",

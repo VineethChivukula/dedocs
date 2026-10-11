@@ -65,7 +65,8 @@ npm run docs:preview
 ├── content/                 # Markdown source files
 │   ├── index.md             # Home page
 │   ├── syllabus.md          # Course syllabus
-│   ├── sql/                 # SQL learning guides
+│   ├── sql/                 # SQL learning content
+│   ├── modeling/            # Data modeling content
 │   └── public/              # Static assets served from the site root
 ├── .vitepress/
 │   ├── config.mts           # VitePress site and navigation configuration
