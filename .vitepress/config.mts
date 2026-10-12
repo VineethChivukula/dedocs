@@ -3,6 +3,7 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
   srcDir: "content",
   markdown: {
+    math: true,
     config(md) {
       const defaultFence = md.renderer.rules.fence;
 
@@ -115,6 +116,10 @@ export default defineConfig({
               {
                 text: "Entities, attributes, and relationships",
                 link: "/modeling/entities-attributes-and-relationships",
+              },
+              {
+                text: "Database normalization mechanics",
+                link: "/modeling/database-normalization-mechanics",
               },
       //         {
       //           text: "Dimensional Modeling (Kimball vs Inmon)",
