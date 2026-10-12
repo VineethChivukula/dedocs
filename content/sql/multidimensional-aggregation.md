@@ -2,190 +2,164 @@
 
 ## Overview
 
-Multidimensional aggregation produces detail rows, subtotals, and grand
-totals in one query. It extends `GROUP BY` with `GROUPING SETS`, `ROLLUP`, and
-`CUBE`.
+Multidimensional aggregation produces detail rows, intermediate subtotals, and grand totals within a single SQL statement. Rather than executing multiple separate `GROUP BY` queries and stitching them together with `UNION ALL`, SQL provides three dedicated operators: `GROUPING SETS`, `ROLLUP`, and `CUBE`.
 
-Use these operators when a report needs several levels of aggregation. They
-can replace multiple `UNION ALL` queries and keep the aggregation logic in one
-statement.
+This guide provides an operational reference for multidimensional aggregation, covering grouping combinations, hierarchical summaries, Cartesian cube sets, the `GROUPING()` disambiguation function, and query optimization.
+
+## Example dataset
+
+The queries in this guide use the following `RegionalSales` table:
+
+| `Region` | `Category` | `SalesAmount` |
+| :--- | :--- | :--- |
+| North | Electronics | 50000.00 |
+| North | Furniture | 30000.00 |
+| South | Electronics | 40000.00 |
+| South | Furniture | 20000.00 |
+
+## Comparison of multidimensional operators
+
+The three operators differ in which combinations of grouping columns they evaluate:
+
+```mermaid
+---
+title: Multidimensional operator grouping sets
+---
+flowchart TD
+    Sets["GROUPING SETS<br/>Explicit user-selected subsets"]
+    Roll["ROLLUP (A, B)<br/>Hierarchical prefix subsets<br/>(A, B), (A), ()"]
+    Cube["CUBE (A, B)<br/>Full Cartesian power set (2^N)<br/>(A, B), (A), (B), ()"]
+```
+
+| Operator | Grouping formula for columns $A, B$ | Number of grouping sets | Typical use case |
+| :--- | :--- | :--- | :--- |
+| `ROLLUP(A, B)` | `(A, B)`, `(A)`, `()` | $N + 1$ sets | Hierarchical data like Year $\rightarrow$ Quarter $\rightarrow$ Month |
+| `CUBE(A, B)` | `(A, B)`, `(A)`, `(B)`, `()` | $2^N$ sets | Cross-tabulation matrices and multi-pivot reporting |
+| `GROUPING SETS (...)` | User specifies exact list | Custom count | Targeted reports needing specific subtotals without grand totals |
 
 ## `GROUPING SETS`
 
-`GROUPING SETS` lets you specify the exact grouping combinations to calculate:
-
-```sql
-GROUP BY GROUPING SETS (
-  (Department, JobTitle),
-  (Department),
-  ()
-)
-```
-
-This expression produces:
-
-- One row for each `Department` and `JobTitle` combination.
-- One subtotal row for each `Department`.
-- One grand-total row from the empty grouping set, `()`.
-
-Use `GROUPING SETS` when you need precise control over the report levels and
-don't need every possible combination.
-
-For example:
+`GROUPING SETS` provides manual control over the generated aggregation levels. The query engine computes only the exact grouping sets specified in the list:
 
 ```sql
 SELECT
-  Department,
-  JobTitle,
-  SUM(Salary) AS TotalSalary
-FROM Employees
+  Region,
+  Category,
+  SUM(SalesAmount) AS TotalSales
+FROM RegionalSales
 GROUP BY GROUPING SETS (
-  (Department, JobTitle),
-  (Department),
+  (Region, Category),
+  (Region),
   ()
 );
 ```
 
+### Output table for `GROUPING SETS`
+
+| `Region` | `Category` | `TotalSales` | Aggregation level |
+| :--- | :--- | :--- | :--- |
+| North | Electronics | 50000.00 | Detail row |
+| North | Furniture | 30000.00 | Detail row |
+| South | Electronics | 40000.00 | Detail row |
+| South | Furniture | 20000.00 | Detail row |
+| North | `NULL` | 80000.00 | Subtotal for North region |
+| South | `NULL` | 60000.00 | Subtotal for South region |
+| `NULL` | `NULL` | 140000.00 | Grand total |
+
+The empty set `()` instructs the database to aggregate across all rows without grouping, producing the grand-total row.
+
 ## `ROLLUP`
 
-`ROLLUP` creates hierarchical subtotals from the ordered list of grouping
-columns. It produces a detail level, then removes columns from right to left
-to create subtotals, and finally produces a grand total.
+`ROLLUP` creates hierarchical subtotals by successively stripping columns from right to left. For $N$ columns, `ROLLUP` produces $N + 1$ grouping sets.
+
+For `ROLLUP (Region, Category)`, the engine computes:
+
+1. `(Region, Category)`: detail rows.
+2. `(Region)`: regional subtotals.
+3. `()`: grand total.
 
 ```sql
 SELECT
   Region,
   Category,
   SUM(SalesAmount) AS TotalSales
-FROM Sales
+FROM RegionalSales
 GROUP BY ROLLUP (Region, Category);
 ```
 
-This query produces:
+### Output table for `ROLLUP`
 
-1. A row for each `Region` and `Category`.
-2. A subtotal for each `Region`.
-3. One grand total.
+| `Region` | `Category` | `TotalSales` | Aggregation level |
+| :--- | :--- | :--- | :--- |
+| North | Electronics | 50000.00 | Detail row |
+| North | Furniture | 30000.00 | Detail row |
+| North | `NULL` | 80000.00 | North subtotal |
+| South | Electronics | 40000.00 | Detail row |
+| South | Furniture | 20000.00 | Detail row |
+| South | `NULL` | 60000.00 | South subtotal |
+| `NULL` | `NULL` | 140000.00 | Grand total |
 
-Column order matters. `ROLLUP(Category, Region)` creates category subtotals,
-not region subtotals.
+Column order is significant in `ROLLUP`. Specifying `ROLLUP (Category, Region)` generates category subtotals rather than regional subtotals.
 
 ## `CUBE`
 
-`CUBE` creates grouping sets for every combination of the specified columns,
-including the grand total:
+`CUBE` generates every mathematical permutation of the specified columns. For $N$ grouping columns, `CUBE` produces $2^N$ grouping sets.
+
+For `CUBE (Region, Category)`, where $N = 2$, the engine produces $2^2 = 4$ grouping sets:
+
+1. `(Region, Category)`: detail level.
+2. `(Region)`: regional subtotal.
+3. `(Category)`: category subtotal.
+4. `()`: grand total.
 
 ```sql
 SELECT
   Region,
   Category,
   SUM(SalesAmount) AS TotalSales
-FROM Sales
+FROM RegionalSales
 GROUP BY CUBE (Region, Category);
 ```
 
-For two columns, `CUBE` produces four grouping combinations:
+### Output table for `CUBE`
 
-- `(Region, Category)`
-- `(Region)`
-- `(Category)`
-- `()`
+| `Region` | `Category` | `TotalSales` | Aggregation level |
+| :--- | :--- | :--- | :--- |
+| North | Electronics | 50000.00 | Detail row |
+| North | Furniture | 30000.00 | Detail row |
+| South | Electronics | 40000.00 | Detail row |
+| South | Furniture | 20000.00 | Detail row |
+| North | `NULL` | 80000.00 | North region subtotal |
+| South | `NULL` | 60000.00 | South region subtotal |
+| `NULL` | Electronics | 90000.00 | Electronics category subtotal |
+| `NULL` | Furniture | 50000.00 | Furniture category subtotal |
+| `NULL` | `NULL` | 140000.00 | Grand total |
 
-For `n` grouping columns, the number of combinations can grow to `2^n`.
-Use `CUBE` when the report needs every combination. Use `GROUPING SETS` when
-you need only selected combinations.
+Notice that `CUBE` includes category subtotals across all regions, enabling cross-dimensional pivot analysis.
 
-## `GROUPING`
+## Distinguishing null values with the `GROUPING()` function
 
-`ROLLUP` and `CUBE` use `NULL` in grouped columns to represent a subtotal or
-grand-total level. However, the source data might also contain a real `NULL`
-value. The `GROUPING(column)` function distinguishes these cases:
+When `ROLLUP` or `CUBE` generates a subtotal or grand total, the database places a `NULL` marker in the aggregated columns. However, source records may also contain natural `NULL` values, such as products without an assigned category.
 
-- `GROUPING(column) = 0` means the column participates in that grouping level.
-- `GROUPING(column) = 1` means the query aggregated the column away for a
-  subtotal or grand-total row.
+The `GROUPING(column)` function resolves this ambiguity:
 
-Use `GROUPING()` to label report rows:
+- `GROUPING(column) = 0`: the column value represents genuine row data.
+- `GROUPING(column) = 1`: the column value is a subtotal placeholder created by the aggregation operator.
 
 ```sql
 SELECT
   CASE
-    WHEN GROUPING(Region) = 1 THEN 'All regions'
+    WHEN GROUPING(Region) = 1 THEN 'All Regions'
     ELSE Region
   END AS RegionLabel,
   CASE
-    WHEN GROUPING(Category) = 1 THEN 'All categories'
+    WHEN GROUPING(Category) = 1 THEN 'All Categories'
     ELSE Category
   END AS CategoryLabel,
+  GROUPING(Region) AS IsRegionAggregated,
+  GROUPING(Category) AS IsCategoryAggregated,
   SUM(SalesAmount) AS TotalSales
-FROM Sales
-GROUP BY CUBE (Region, Category);
-```
-
-When the source column is numeric, cast it before combining it with a text
-label:
-
-```sql
-CASE
-  WHEN GROUPING(DepartmentID) = 1 THEN 'All'
-  ELSE CAST(DepartmentID AS VARCHAR(20))
-END AS DepartmentLabel
-```
-
-The cast syntax and supported text type depend on the database engine.
-
-## Filtering detail rows and totals
-
-Use `WHERE` to filter source rows before the database calculates grouping
-sets. Use `HAVING` to filter aggregated rows after grouping.
-
-For example:
-
-```sql
-SELECT
-  Region,
-  Category,
-  SUM(SalesAmount) AS TotalSales
-FROM Sales
-WHERE SaleDate >= '2026-01-01'
-GROUP BY CUBE (Region, Category)
-HAVING SUM(SalesAmount) > 1000;
-```
-
-The `WHERE` clause affects the detail rows that contribute to every subtotal
-and total. The `HAVING` clause can remove individual grouping-set results,
-including subtotal and grand-total rows.
-
-To filter a specific grouping level, use `GROUPING()` in `HAVING`:
-
-```sql
-HAVING
-  GROUPING(Region) = 0
-  AND GROUPING(Category) = 1
-```
-
-This condition keeps only region subtotal rows.
-
-## Complete example
-
-Suppose a `Sales` table contains `Region`, `Category`, and `SalesAmount`.
-The following query creates detail rows, regional subtotals, category
-subtotals, and a grand total:
-
-```sql
-SELECT
-  CASE
-    WHEN GROUPING(Region) = 1 THEN 'All regions'
-    ELSE Region
-  END AS RegionLabel,
-  CASE
-    WHEN GROUPING(Category) = 1 THEN 'All categories'
-    ELSE Category
-  END AS CategoryLabel,
-  GROUPING(Region) AS IsRegionSubtotal,
-  GROUPING(Category) AS IsCategorySubtotal,
-  SUM(SalesAmount) AS TotalSales
-FROM Sales
+FROM RegionalSales
 GROUP BY CUBE (Region, Category)
 ORDER BY
   GROUPING(Region),
@@ -194,90 +168,46 @@ ORDER BY
   Category;
 ```
 
-For this source data:
+### Output table with explicit grouping labels
 
-| Region | Category | SalesAmount |
-| --- | --- | ---: |
-| North | Electronics | 50000 |
-| North | Furniture | 30000 |
-| South | Electronics | 40000 |
-| South | Furniture | 20000 |
-
-The query returns rows similar to these:
-
-| Region label | Category label | Region grouping | Category grouping | Total sales | Level |
-| --- | --- | ---: | ---: | ---: | --- |
-| North | Electronics | 0 | 0 | 50000 | Detail |
-| North | Furniture | 0 | 0 | 30000 | Detail |
-| South | Electronics | 0 | 0 | 40000 | Detail |
-| South | Furniture | 0 | 0 | 20000 | Detail |
-| North | All categories | 0 | 1 | 80000 | Region subtotal |
-| South | All categories | 0 | 1 | 60000 | Region subtotal |
-| All regions | Electronics | 1 | 0 | 90000 | Category subtotal |
-| All regions | Furniture | 1 | 0 | 50000 | Category subtotal |
-| All regions | All categories | 1 | 1 | 140000 | Grand total |
-
-The grouping flags let applications identify the row level without relying on
-display labels.
+| `RegionLabel` | `CategoryLabel` | `IsRegionAggregated` | `IsCategoryAggregated` | `TotalSales` | Level |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| North | Electronics | 0 | 0 | 50000.00 | Detail |
+| North | Furniture | 0 | 0 | 30000.00 | Detail |
+| South | Electronics | 0 | 0 | 40000.00 | Detail |
+| South | Furniture | 0 | 0 | 20000.00 | Detail |
+| North | All Categories | 0 | 1 | 80000.00 | Region subtotal |
+| South | All Categories | 0 | 1 | 60000.00 | Region subtotal |
+| All Regions | Electronics | 1 | 0 | 90000.00 | Category subtotal |
+| All Regions | Furniture | 1 | 0 | 50000.00 | Category subtotal |
+| All Regions | All Categories | 1 | 1 | 140000.00 | Grand total |
 
 ## Common pitfalls
 
-### Combinatorial growth with `CUBE`
+### Combinatorial explosion with high-dimensional `CUBE`
 
-`CUBE` can produce up to `2^n` grouping combinations for `n` columns. The
-number of result rows can grow quickly, especially when each combination has
-many distinct values.
+Because `CUBE` produces $2^N$ grouping combinations, expanding five dimensions produces $2^5 = 32$ grouping passes. Expanding ten dimensions generates $2^{10} = 1024$ grouping sets, creating high row counts, severe memory pressure, and extended query run times.
 
-Use `GROUPING SETS` for a smaller set of required levels. Filter source rows
-with `WHERE` and select only the grouping columns that the report needs.
+Use `GROUPING SETS` to target only the specific subtotal combinations required by reporting tools.
 
-### Filtering totals with `WHERE`
+### Filtering subtotals in `WHERE` versus `HAVING`
 
-`WHERE` runs before aggregation, so it can't filter a calculated subtotal or
-grand total. Use `HAVING` for aggregate conditions and `GROUPING()` to select
-a specific subtotal level.
+A `WHERE` clause filters individual rows before aggregation occurs. Attempting to filter out grand totals using `WHERE` fails because grand totals don't exist until after aggregation runs.
 
-### Dialect and syntax differences
-
-Support for `GROUPING SETS`, `ROLLUP`, `CUBE`, and `GROUPING()` varies by
-database engine. Syntax can also differ for combining these operators with
-ordinary grouping columns.
-
-Check the database engine documentation before relying on a feature in
-portable SQL. If an engine doesn't support the required grouping operator, you
-might need separate queries or a compatible reporting layer.
-
-### Data type mismatches in labels
-
-`CASE` branches must return compatible data types. A numeric department
-identifier doesn't always work directly with a text label such as
-`'All'`.
-
-Cast the identifier to text before using it in the `ELSE` branch:
+To filter out intermediate subtotals or retain only grand totals, filter on `GROUPING()` inside the `HAVING` clause:
 
 ```sql
-CASE
-  WHEN GROUPING(DepartmentID) = 1 THEN 'All'
-  ELSE CAST(DepartmentID AS VARCHAR(20))
-END
+-- Retain only regional subtotals, excluding detail rows and grand totals:
+SELECT Region, Category, SUM(SalesAmount) AS TotalSales
+FROM RegionalSales
+GROUP BY CUBE (Region, Category)
+HAVING GROUPING(Region) = 0 AND GROUPING(Category) = 1;
 ```
-
-Choose a cast type supported by the database engine.
-
-### Confusing source `NULL` values with subtotals
-
-A `NULL` in a grouped column can come from the source data or from an
-aggregation level created by `ROLLUP` or `CUBE`. Use `GROUPING()` to tell the
-two cases apart before displaying or filtering the result.
 
 ## Key takeaways
 
-- Use `GROUPING SETS` for explicitly selected aggregation levels.
-- Use `ROLLUP` for hierarchical subtotals based on column order.
-- Use `CUBE` for all combinations of the specified grouping columns.
-- Use `GROUPING()` to distinguish subtotal placeholders from source `NULL`
-  values.
-- Use `WHERE` to filter source rows and `HAVING` to filter grouped results.
-- Prefer `GROUPING SETS` when `CUBE` would generate unnecessary combinations.
-- Check data types and database-engine support before labeling or deploying a
-  multidimensional report.
+- Use `GROUPING SETS` to calculate custom subsets of aggregations without generating unused permutations.
+- Use `ROLLUP` for ordered hierarchical dimensions, producing $N + 1$ sets.
+- Use `CUBE` for full cross-tabulation matrices across dimensions, producing $2^N$ sets.
+- Use `GROUPING(column)` to distinguish between natural data nulls and engine-generated subtotal placeholders.
+- Filter detail rows using `WHERE` and filter generated subtotal levels using `HAVING`.

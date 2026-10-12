@@ -2,308 +2,353 @@
 
 ## Overview
 
-Recursive queries navigate hierarchical or graph-shaped data when the number
-of relationship levels isn't known in advance. A recursive common table
-expression repeatedly follows relationships until it reaches a stopping
-condition.
+Recursive queries navigate hierarchical, nested, or graph-shaped data when the number of relationship levels isn't known in advance. While standard SQL joins require fixed table aliases for each traversal level, a recursive Common Table Expression (CTE) repeatedly executes a query expression, following relationships until it meets a termination condition.
 
-Use recursive queries for organizational hierarchies, bill-of-materials
-explosions, dependency graphs, and other adjacency-list data. This guide
-explains the structure of a recursive common table expression and shows how to prevent cycles.
+This guide provides a ground-level reference for recursive queries, covering anchor members, recursive iteration mechanics, working-table state queues, cycle detection, bill of materials explosions, and production query optimization.
 
-## Recursive query structure
+## Example organizational hierarchy
 
-A recursive common table expression has two query parts:
+Hierarchical data commonly follows an adjacency list pattern, where a foreign key in each row references the primary key of its parent row in the same table.
 
-1. The **anchor member** returns the starting rows.
-2. The **recursive member** follows relationships from the rows found in the
-   previous iteration.
+Consider the following `Employees` table:
 
-The parts are usually combined with `UNION ALL`:
+| `EmployeeID` | `Name` | `Title` | `ManagerID` |
+| :--- | :--- | :--- | :--- |
+| 1 | Sarah Taylor | President | `NULL` |
+| 2 | John Smith | VP Engineering | 1 |
+| 3 | Lisa Ray | VP Sales | 1 |
+| 4 | Mike Davis | Lead Architect | 2 |
+| 5 | Emma Stone | Senior Engineer | 4 |
+| 6 | Alex Wong | Account Executive | 3 |
+
+```mermaid
+---
+title: Organizational hierarchy tree
+---
+flowchart TD
+    Sarah["Sarah Taylor (1)<br/>President"]
+    John["John Smith (2)<br/>VP Engineering"]
+    Lisa["Lisa Ray (3)<br/>VP Sales"]
+    Mike["Mike Davis (4)<br/>Lead Architect"]
+    Emma["Emma Stone (5)<br/>Senior Engineer"]
+    Alex["Alex Wong (6)<br/>Account Executive"]
+
+    Sarah --> John
+    Sarah --> Lisa
+    John --> Mike
+    Mike --> Emma
+    Lisa --> Alex
+```
+
+## Structure of a recursive query
+
+A recursive query combines two distinct members using the `UNION ALL` operator:
+
+1. **Anchor member**: a non-recursive query that executes exactly once to retrieve the base or root records.
+2. **Recursive member**: a query that references the recursive CTE itself, joining the previous iteration results back to the source table to find child records.
 
 ```sql
-WITH RECURSIVE hierarchy AS (
-  -- Anchor member
+WITH RECURSIVE OrgHierarchy AS (
+  -- 1. Anchor Member: Find the root executive (ManagerID IS NULL)
   SELECT
     EmployeeID,
+    Name,
+    Title,
     ManagerID,
-    0 AS Depth
+    0 AS Depth,
+    CAST(Name AS VARCHAR(500)) AS ManagementPath
   FROM Employees
   WHERE ManagerID IS NULL
 
   UNION ALL
 
-  -- Recursive member
+  -- 2. Recursive Member: Join children to their parent from the previous iteration
   SELECT
     e.EmployeeID,
+    e.Name,
+    e.Title,
     e.ManagerID,
-    h.Depth + 1
+    h.Depth + 1 AS Depth,
+    CAST(h.ManagementPath || ' -> ' || e.Name AS VARCHAR(500)) AS ManagementPath
   FROM Employees AS e
-  JOIN hierarchy AS h
+  INNER JOIN OrgHierarchy AS h
     ON e.ManagerID = h.EmployeeID
 )
 SELECT
   EmployeeID,
-  ManagerID,
-  Depth
-FROM hierarchy;
-```
-
-The database evaluates the anchor member first. It then evaluates the
-recursive member using rows produced by the previous iteration and appends
-new rows to the result. Recursion stops when an iteration produces no new
-rows or when the database reaches a configured recursion limit.
-
-The exact syntax varies by database engine. Some engines require `RECURSIVE`
-after `WITH`, while others use `WITH` alone or provide a different recursion
-syntax.
-
-### Column alignment
-
-The anchor and recursive members must return the same number of columns in the
-same order. Corresponding columns must have compatible data types.
-
-If a column changes type during recursion, cast both members to a common type:
-
-```sql
-WITH RECURSIVE paths AS (
-  SELECT
-    NodeID,
-    CAST(NodeID AS VARCHAR(500)) AS Path
-  FROM Nodes
-  WHERE ParentID IS NULL
-
-  UNION ALL
-
-  SELECT
-    child.NodeID,
-    CAST(paths.Path || '/' || child.NodeID AS VARCHAR(500))
-  FROM Nodes AS child
-  JOIN paths
-    ON child.ParentID = paths.NodeID
-)
-SELECT NodeID, Path
-FROM paths;
-```
-
-Use the concatenation and cast syntax supported by your database engine.
-
-## Hierarchies and trees
-
-An adjacency list represents a hierarchy with a parent reference. For
-example, an `Employees.ManagerID` column can reference `Employees.EmployeeID`.
-The relationship forms a tree when each node has at most one parent and the
-data contains no cycles.
-
-Recursive queries can:
-
-- Find all descendants of a manager.
-- Find the path from a node to its root.
-- Calculate the depth of each node.
-- Build a display path such as `Company / Sales / West`.
-- Aggregate values across a branch of the hierarchy.
-
-For example, this query returns all reports under manager 101:
-
-```sql
-WITH RECURSIVE reports AS (
-  SELECT
-    EmployeeID,
-    Name,
-    ManagerID,
-    0 AS Depth
-  FROM Employees
-  WHERE EmployeeID = 101
-
-  UNION ALL
-
-  SELECT
-    e.EmployeeID,
-    e.Name,
-    e.ManagerID,
-    r.Depth + 1
-  FROM Employees AS e
-  JOIN reports AS r
-    ON e.ManagerID = r.EmployeeID
-)
-SELECT
-  EmployeeID,
   Name,
-  ManagerID,
-  Depth
-FROM reports
-WHERE Depth > 0;
+  Title,
+  Depth,
+  ManagementPath
+FROM OrgHierarchy
+ORDER BY Depth, EmployeeID;
 ```
 
-## Bill-of-materials explosions
+## Step-by-step engine execution trace
 
-A bill of materials describes how a finished product consists of
-sub-assemblies, components, and raw materials. A recursive query can expand
-the complete parts list for an assembly.
+Relational database engines evaluate recursive queries through an iterative working table queue.
 
-If a parent requires a quantity of a component, multiply quantities as the
-query moves down the hierarchy. For example, if assembly 100 requires 2 units
-of part 200 and part 200 requires 4 units of part 300, assembly 100 requires
-8 units of part 300.
+```mermaid
+---
+title: Iterative working table loop
+---
+flowchart TD
+    Init["Step 0: Evaluate Anchor Member<br/>Populate Working Table W0 and Result Set R"]
+    Eval["Step N: Join Source Table against W(N-1)<br/>Generate Intermediate Working Table W(N)"]
+    Check{"Is W(N) Empty?"}
+    Append["Append W(N) rows to Result Set R<br/>Set Working Table to W(N)"]
+    Done["Return Accumulated Result Set R"]
 
-Track the following values when expanding a bill of materials:
+    Init --> Eval
+    Eval --> Check
+    Check -- No --> Append
+    Append --> Eval
+    Check -- Yes --> Done
+```
 
-- Current parent and component identifiers.
-- Total quantity required along the path.
-- Depth in the component hierarchy.
-- The path of visited components.
-- A cycle flag or other stopping condition.
+### Iteration 0: anchor evaluation
 
-## Cycle detection
+The engine executes the anchor query. It populates initial Working Table $W_0$ and appends these rows to final accumulator result set $R$:
 
-Graphs can contain cycles, such as `A -> B -> C -> A`. Without cycle
-detection or a recursion limit, a recursive query can continue indefinitely or
-generate an unexpectedly large result.
+**Working Table $W_0$**:
 
-Common cycle-prevention strategies include:
+| `EmployeeID` | `Name` | `Title` | `ManagerID` | `Depth` | `ManagementPath` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | Sarah Taylor | President | `NULL` | 0 | Sarah Taylor |
 
-- Store the visited identifiers in a path and stop when the next identifier
-  already appears.
-- Maintain a visited-node table when the database engine supports that
-  pattern.
-- Use a database-specific cycle-detection clause.
-- Set a maximum depth as a safety limit.
+### Iteration 1: first recursive hop
 
-A maximum depth limits damage but doesn't identify the invalid relationship.
-Use path tracking or an engine feature when you need to report the cycle.
+The engine executes the recursive member by joining `Employees` against Working Table $W_0$ on `e.ManagerID = h.EmployeeID`, matching records where `ManagerID = 1`. This yields Working Table $W_1$:
 
-## Complete example
+**Working Table $W_1$**:
 
-The following example expands the components of assembly 100. It multiplies
-quantities, tracks depth and path, and marks a repeated component.
+| `EmployeeID` | `Name` | `Title` | `ManagerID` | `Depth` | `ManagementPath` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2 | John Smith | VP Engineering | 1 | 1 | Sarah Taylor -> John Smith |
+| 3 | Lisa Ray | VP Sales | 1 | 1 | Sarah Taylor -> Lisa Ray |
+
+The engine appends $W_1$ rows to result set $R$. Because $W_1$ contains rows, recursion proceeds.
+
+### Iteration 2: second recursive hop
+
+The engine joins `Employees` against Working Table $W_1$, matching records where `ManagerID` is 2 or 3. This yields Working Table $W_2$:
+
+**Working Table $W_2$**:
+
+| `EmployeeID` | `Name` | `Title` | `ManagerID` | `Depth` | `ManagementPath` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 4 | Mike Davis | Lead Architect | 2 | 2 | Sarah Taylor -> John Smith -> Mike Davis |
+| 6 | Alex Wong | Account Executive | 3 | 2 | Sarah Taylor -> Lisa Ray -> Alex Wong |
+
+The engine appends $W_2$ rows to result set $R$.
+
+### Iteration 3: third recursive hop
+
+The engine joins `Employees` against Working Table $W_2$, matching records where `ManagerID` is 4 or 6. This yields Working Table $W_3$:
+
+**Working Table $W_3$**:
+
+| `EmployeeID` | `Name` | `Title` | `ManagerID` | `Depth` | `ManagementPath` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 5 | Emma Stone | Senior Engineer | 4 | 3 | Sarah Taylor -> John Smith -> Mike Davis -> Emma Stone |
+
+The engine appends $W_3$ rows to result set $R$.
+
+### Iteration 4: loop termination
+
+The engine joins `Employees` against Working Table $W_3$, matching records where `ManagerID` is 5. No employees report to Emma Stone, so Working Table $W_4$ returns zero rows.
+
+Because $W_4$ is empty, the engine terminates the recursive loop and returns accumulated result set $R$.
+
+#### Final query output
+
+| `EmployeeID` | `Name` | `Title` | `Depth` | `ManagementPath` |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | Sarah Taylor | President | 0 | Sarah Taylor |
+| 2 | John Smith | VP Engineering | 1 | Sarah Taylor -> John Smith |
+| 3 | Lisa Ray | VP Sales | 1 | Sarah Taylor -> Lisa Ray |
+| 4 | Mike Davis | Lead Architect | 2 | Sarah Taylor -> John Smith -> Mike Davis |
+| 6 | Alex Wong | Account Executive | 2 | Sarah Taylor -> Lisa Ray -> Alex Wong |
+| 5 | Emma Stone | Senior Engineer | 3 | Sarah Taylor -> John Smith -> Mike Davis -> Emma Stone |
+
+## Graph traversals and cycle detection
+
+Unlike simple trees, directed graphs can contain cycles. A cycle occurs when following relationships leads back to an already visited node, such as `Node 1 -> Node 2 -> Node 3 -> Node 1`.
+
+Without cycle detection, a recursive query enters an infinite loop, consuming CPU and memory until the database crashes or reaches its query timeout.
+
+```mermaid
+---
+title: Cyclic dependency graph
+---
+flowchart LR
+    N1["Part 100<br/>Frame"] --> N2["Part 200<br/>Subassembly"]
+    N2 --> N3["Part 300<br/>Bracket"]
+    N3 -->|Cycle Fault| N1
+```
+
+### Path string tracking for cycle prevention
+
+To stop cycles in standard SQL engines, maintain a delimited path string of visited identifiers and inspect whether the child identifier already exists in the path history:
 
 ```sql
-CREATE TABLE BillOfMaterials (
-  ParentPartID INTEGER,
-  ComponentPartID INTEGER,
-  Quantity INTEGER NOT NULL,
-  PRIMARY KEY (ParentPartID, ComponentPartID)
+CREATE TABLE GraphEdges (
+  SourceID INTEGER NOT NULL,
+  TargetID INTEGER NOT NULL,
+  PRIMARY KEY (SourceID, TargetID)
 );
 
-INSERT INTO BillOfMaterials (
-  ParentPartID,
-  ComponentPartID,
-  Quantity
-) VALUES
-  (100, 200, 2),
-  (100, 201, 1),
-  (200, 300, 4),
-  (201, 300, 2),
-  (300, 100, 1);
+INSERT INTO GraphEdges (SourceID, TargetID) VALUES
+  (100, 200),
+  (200, 300),
+  (300, 100); -- Cycles back to 100
+```
 
-WITH RECURSIVE PartsExplosion AS (
+```sql
+WITH RECURSIVE Traversal AS (
+  -- Anchor: start from node 100
   SELECT
-    ParentPartID,
-    ComponentPartID,
-    Quantity AS TotalQuantity,
+    SourceID,
+    TargetID,
     1 AS Depth,
-    CAST(
-      '/' || ParentPartID || '/' || ComponentPartID || '/'
-      AS VARCHAR(500)
-    ) AS PathHistory,
+    CAST('/' || SourceID || '/' || TargetID || '/' AS VARCHAR(500)) AS VisitedPath,
     0 AS IsCycle
-  FROM BillOfMaterials
-  WHERE ParentPartID = 100
+  FROM GraphEdges
+  WHERE SourceID = 100
 
   UNION ALL
 
+  -- Recursive member with cycle flag
   SELECT
-    bom.ParentPartID,
-    bom.ComponentPartID,
-    pe.TotalQuantity * bom.Quantity AS TotalQuantity,
-    pe.Depth + 1 AS Depth,
-    CAST(
-      pe.PathHistory || bom.ComponentPartID || '/'
-      AS VARCHAR(500)
-    ) AS PathHistory,
+    g.SourceID,
+    g.TargetID,
+    t.Depth + 1 AS Depth,
+    CAST(t.VisitedPath || g.TargetID || '/' AS VARCHAR(500)) AS VisitedPath,
     CASE
-      WHEN pe.PathHistory LIKE '%/' || bom.ComponentPartID || '/%' THEN 1
+      WHEN t.VisitedPath LIKE '%/' || g.TargetID || '/%' THEN 1
       ELSE 0
     END AS IsCycle
-  FROM PartsExplosion AS pe
-  JOIN BillOfMaterials AS bom
-    ON pe.ComponentPartID = bom.ParentPartID
-  WHERE pe.IsCycle = 0
+  FROM GraphEdges AS g
+  INNER JOIN Traversal AS t
+    ON g.SourceID = t.TargetID
+  WHERE t.IsCycle = 0
 )
 SELECT
-  ParentPartID,
-  ComponentPartID,
-  TotalQuantity,
+  SourceID,
+  TargetID,
   Depth,
-  PathHistory,
+  VisitedPath,
   IsCycle
-FROM PartsExplosion;
+FROM Traversal;
 ```
 
-The row `(300, 100, 1)` creates a cycle back to component 100. The path
-check marks that row with `IsCycle = 1`, and the `WHERE pe.IsCycle = 0`
-condition prevents the query from expanding that branch again.
+#### Traversal output with cycle resolution
 
-This example uses string concatenation and `LIKE` for path tracking. For large
-graphs or identifiers that can overlap as text, use a database-supported array,
-JSON, or visited-set representation instead.
+| `SourceID` | `TargetID` | `Depth` | `VisitedPath` | `IsCycle` |
+| :--- | :--- | :--- | :--- | :--- |
+| 100 | 200 | 1 | `/100/200/` | 0 |
+| 200 | 300 | 2 | `/100/200/300/` | 0 |
+| 300 | 100 | 3 | `/100/200/300/100/` | **1** |
+
+When the traversal reaches `(300, 100)`, the `CASE` statement flags `IsCycle = 1`. The recursive filter `WHERE t.IsCycle = 0` halts further expansion along that path, preventing an infinite loop.
+
+## Bill of materials explosion
+
+A Bill of Materials (BOM) tracks parts, assemblies, and raw components required to manufacture a product. Expanding a BOM requires multiplying component quantities cumulatively down each assembly level.
+
+Consider an electric bicycle assembly:
+
+| `ParentPart` | `ChildPart` | `QuantityPerParent` |
+| :--- | :--- | :--- |
+| E-Bike | Frame | 1 |
+| E-Bike | Wheel | 2 |
+| Wheel | Rim | 1 |
+| Wheel | Spoke | 36 |
+| Wheel | Tire | 1 |
+
+```sql
+WITH RECURSIVE PartsExplosion AS (
+  -- Anchor: Root product
+  SELECT
+    ParentPart,
+    ChildPart,
+    QuantityPerParent AS TotalQuantity,
+    1 AS AssemblyLevel,
+    CAST(ParentPart || ' -> ' || ChildPart AS VARCHAR(500)) AS AssemblyPath
+  FROM BillOfMaterials
+  WHERE ParentPart = 'E-Bike'
+
+  UNION ALL
+
+  -- Recursive: Multiply quantity by parent requirement
+  SELECT
+    bom.ParentPart,
+    bom.ChildPart,
+    p.TotalQuantity * bom.QuantityPerParent AS TotalQuantity,
+    p.AssemblyLevel + 1 AS AssemblyLevel,
+    CAST(p.AssemblyPath || ' -> ' || bom.ChildPart AS VARCHAR(500)) AS AssemblyPath
+  FROM BillOfMaterials AS bom
+  INNER JOIN PartsExplosion AS p
+    ON bom.ParentPart = p.ChildPart
+)
+SELECT
+  ChildPart,
+  AssemblyLevel,
+  TotalQuantity,
+  AssemblyPath
+FROM PartsExplosion
+ORDER BY AssemblyLevel, ChildPart;
+```
+
+### Bill of materials query result
+
+| `ChildPart` | `AssemblyLevel` | `TotalQuantity` | `AssemblyPath` |
+| :--- | :--- | :--- | :--- |
+| Frame | 1 | 1 | E-Bike -> Frame |
+| Wheel | 1 | 2 | E-Bike -> Wheel |
+| Rim | 2 | 2 | E-Bike -> Wheel -> Rim |
+| Spoke | 2 | **72** | E-Bike -> Wheel -> Spoke |
+| Tire | 2 | 2 | E-Bike -> Wheel -> Tire |
+
+Because an E-Bike requires `2` Wheels and each Wheel requires `36` Spokes, the recursive query multiplies `2 * 36` to compute the correct total of `72` Spokes.
 
 ## Common pitfalls
 
-### Infinite recursion
+### Accidental performance penalty of `UNION` versus `UNION ALL`
 
-A cycle, an incorrect join condition, or a missing stopping condition can
-cause recursion to continue until the engine reaches its recursion limit.
+Always combine recursive CTE members with `UNION ALL` unless your specific algorithm requires distinct row removal at every step. Standard `UNION` forces the database engine to sort and hash the working table between iterations, causing severe memory pressure on deep graphs.
 
-Use a cycle check, a maximum depth, or both. Treat a recursion-limit error as a
-data or query problem to investigate, not as proof that the hierarchy is
-valid.
+```sql
+-- Fast and standard: appends intermediate rows directly
+UNION ALL
 
-### Data type mismatches
+-- Slow: executes expensive duplicate removal on every iteration
+UNION
+```
 
-The anchor and recursive members must return compatible types. String paths
-are a common source of errors because concatenation can produce a type or
-length different from the anchor expression.
+### Missing string width casts in path tracking
 
-Cast both expressions to a suitable type and length. Increase the path
-capacity when the maximum traversal depth or identifier length requires it.
+Concatenating strings inside a recursive member expands the string width. If the anchor member defines a string without an explicit size, the database infers the column width from the anchor literal.
 
-### Row explosion
+In PostgreSQL and SQLite, text columns adjust dynamically. However, in SQL Server and Oracle, omitting an explicit `CAST(... AS VARCHAR(500))` in the anchor triggers an arithmetic overflow error as strings lengthen.
 
-Branching graphs can produce many paths. A node can appear once for every
-distinct path that reaches it, so the number of rows can grow rapidly with
-depth and branching factor.
+### Filtering in the wrong query block
 
-Filter the anchor rows, restrict the recursive join, enforce a depth limit,
-and index the parent-reference column. Aggregate or remove duplicates only when
-doing so matches the meaning of the result.
+To limit how deep the recursion descends, place depth and cycle filters inside the recursive member `WHERE` clause. Placing filters only in the outer `SELECT` query allows the recursive engine to execute the entire deep traversal before discarding rows.
 
-### `UNION` and `UNION ALL`
+```sql
+-- Efficient: Stops the recursive engine at depth 3
+SELECT ... FROM Employees AS e JOIN OrgHierarchy AS h ON ... WHERE h.Depth < 3
 
-Recursive common table expressions commonly use `UNION ALL` because it preserves every generated
-path and lets the query apply its own cycle logic. Replacing it with `UNION`
-can remove duplicate rows, but it can also hide meaningful paths and change
-the traversal behavior.
-
-Use the operator required by the database engine and the result you need. Do
-not use duplicate removal as a substitute for cycle detection.
-
-### Using relational recursion for every graph problem
-
-Recursive SQL can traverse many graph structures, but complex graph
-algorithms can become difficult to express and tune. Large, highly connected
-graphs may need specialized graph features or a graph database.
-
-Choose the approach based on graph size, traversal depth, query frequency,
-required algorithms, and the database features available to you.
+-- Inefficient: Traverses the entire tree, filtering only after full execution
+SELECT ... FROM OrgHierarchy WHERE Depth <= 3
+```
 
 ## Key takeaways
 
-- Use a recursive common table expression for variable-depth hierarchies and
-  graph traversals.
-- Define an anchor member and a recursive member with aligned columns.
-- Track depth, paths, or visited nodes to control traversal.
-- Detect cycles explicitly instead of relying only on recursion limits.
-- Expect row counts to grow quickly in branching graphs.
-- Index relationship columns and constrain recursion for large data sets.
-- Verify recursive syntax, limits, and cycle features for your database engine.
+- Use recursive common table expressions to query tree hierarchies and graphs of variable depth.
+- Formulate the query with an anchor member for base rows and a recursive member for child hops.
+- Understand the working-table loop: the engine evaluates each step against the immediate prior iteration, not the entire accumulated table.
+- Guard against infinite recursion by tracking visited paths or enforcing a maximum depth threshold.
+- Cast string paths explicitly in both members to prevent string truncation errors.
+- Apply traversal filters inside the recursive member to prune branches early during execution.

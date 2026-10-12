@@ -2,283 +2,209 @@
 
 ## Overview
 
-SQL aggregation functions summarize rows and return metrics such as counts,
-totals, averages, minimums, and maximums. Use `GROUP BY` to calculate those
-metrics for distinct groups, and use `HAVING` to filter the grouped results.
+SQL aggregation functions summarize multiple rows of data into computed metrics such as counts, sums, averages, minimums, and maximums. When combined with the `GROUP BY` clause, aggregation partitions row streams into discrete groups, while the `HAVING` clause filters the aggregated results.
 
-This guide introduces the core aggregation functions and explains how
-`WHERE`, `GROUP BY`, and `HAVING` work together.
+This guide provides an end-to-end operational reference for aggregate functions, multi-column grouping, the logical query execution pipeline, and the fundamental differences between `WHERE` and `HAVING`.
 
-## Aggregate functions
+## Example dataset
 
-An aggregate function calculates a value from a set of rows. When a query
-doesn't include `GROUP BY`, the database treats all rows selected by the query
-as one group.
+The queries in this guide use the following `Orders` table, which includes orders across multiple categories, historical dates, and a null order amount:
 
-### `COUNT`
+| `OrderID` | `CustomerID` | `Category` | `OrderAmount` | `OrderDate` |
+| :--- | :--- | :--- | :--- | :--- |
+| 101 | C1 | Electronics | 300.00 | 2026-01-10 |
+| 102 | C2 | Electronics | 700.00 | 2026-01-15 |
+| 103 | C1 | Books | 40.00 | 2026-01-20 |
+| 104 | C3 | Books | `NULL` | 2026-02-01 |
+| 105 | C2 | Clothing | 150.00 | 2025-12-28 |
+| 106 | C4 | Clothing | 250.00 | 2026-02-14 |
 
-`COUNT` returns the number of items in a group.
+## Global aggregate functions
 
-- `COUNT(*)` counts every row, including rows that contain `NULL` values.
-- `COUNT(column_name)` counts only rows where the specified column isn't
-  `NULL`.
-
-For example:
+When a query omits the `GROUP BY` clause, the database treats all matching rows as a single global group:
 
 ```sql
 SELECT
-  COUNT(*) AS TotalOrders,
-  COUNT(OrderAmount) AS OrdersWithAmounts
-FROM Orders;
-```
-
-`TotalOrders` includes every row in `Orders`. `OrdersWithAmounts` excludes
-rows where `OrderAmount` is `NULL`.
-
-### `SUM`
-
-`SUM(column_name)` calculates the total of the non-`NULL` numeric values in a
-group. If the group has no non-`NULL` values, the result can be `NULL`,
-depending on the database engine. Use `COALESCE` when your app needs
-to represent that result as zero:
-
-```sql
-SELECT COALESCE(SUM(OrderAmount), 0) AS TotalRevenue
-FROM Orders;
-```
-
-### `AVG`
-
-`AVG(column_name)` calculates the arithmetic mean of the non-`NULL` values in
-a group. Conceptually, it divides the sum by the count of non-`NULL` values:
-
-```text
-AVG(column_name) = SUM(column_name) / COUNT(column_name)
-```
-
-For example, `AVG` returns `200` for the values `100`, `200`, `300`, and
-`NULL`. It divides the sum, `600`, by 3 rather than by 4.
-
-If `NULL` should represent zero in your data model, convert it before
-calculating the average:
-
-```sql
-SELECT AVG(COALESCE(OrderAmount, 0)) AS AvgOrderValue
-FROM Orders;
-```
-
-This changes the calculation. Use it only when treating missing values as
-zero matches your business rules.
-
-### `MIN` and `MAX`
-
-`MIN(column_name)` returns the lowest value in a group. `MAX(column_name)`
-returns the highest value. Both functions ignore `NULL` values.
-
-You can use these functions with values that have an ordering, including
-numbers, strings, dates, and timestamps:
-
-```sql
-SELECT
-  MIN(OrderDate) AS FirstOrder,
-  MAX(OrderDate) AS LastOrder
-FROM Orders;
-```
-
-## `GROUP BY`
-
-The `GROUP BY` clause partitions rows into groups that share the same values
-in one or more columns. Aggregate functions then calculate one result for
-each group.
-
-For example, this query returns one row for each category:
-
-```sql
-SELECT
-  Category,
-  COUNT(*) AS TotalOrders,
-  SUM(OrderAmount) AS TotalRevenue
-FROM Orders
-GROUP BY Category;
-```
-
-### The `GROUP BY` rule
-
-Every selected expression must either:
-
-- Appear in the `GROUP BY` clause, or
-- Use an aggregate function.
-
-For example, this query follows the rule:
-
-```sql
-SELECT
-  Category,
-  COUNT(*) AS TotalOrders
-FROM Orders
-GROUP BY Category;
-```
-
-The following query violates the rule because `OrderDate` isn't grouped
-nor aggregated:
-
-```sql
-SELECT
-  Category,
-  OrderDate,
-  COUNT(*) AS TotalOrders
-FROM Orders
-GROUP BY Category;
-```
-
-The database can't choose one `OrderDate` value to display for a category
-that contains multiple orders. Most database engines reject this query. Some
-configurations allow it and return an arbitrary value, which can make results
-unreliable.
-
-## `WHERE` and `HAVING`
-
-Use `WHERE` to filter individual rows before grouping. Use `HAVING` to filter
-groups after aggregation.
-
-The logical processing order is:
-
-1. `WHERE` filters rows from the source tables.
-2. `GROUP BY` collects the remaining rows into groups.
-3. Aggregate functions calculate values for each group.
-4. `HAVING` filters the resulting groups.
-5. `SELECT` returns the requested columns and calculated values.
-
-`WHERE` can't contain an aggregate condition such as `SUM(OrderAmount) > 1000`
-because the database hasn't formed the groups when it evaluates `WHERE`.
-Place aggregate conditions in `HAVING` instead:
-
-```sql
-SELECT
-  Category,
-  SUM(OrderAmount) AS TotalRevenue
-FROM Orders
-WHERE OrderDate >= '2025-01-01'
-GROUP BY Category
-HAVING SUM(OrderAmount) > 1000;
-```
-
-Use `WHERE` for conditions on individual rows, even when the same condition
-could appear in `HAVING`. Filtering rows before grouping usually reduces the
-amount of data that the database must group and aggregate.
-
-## Complete example
-
-Suppose that an `Orders` table contains `OrderID`, `CustomerID`, `Category`,
-`OrderAmount`, and `OrderDate`. The following query returns categories with at
-least 5 orders, an average order value greater than 100, and orders from 2025
-onward:
-
-```sql
-SELECT
-  Category,
   COUNT(*) AS TotalOrders,
   COUNT(OrderAmount) AS OrdersWithAmounts,
   SUM(OrderAmount) AS TotalRevenue,
-  AVG(OrderAmount) AS AvgOrderValue,
+  ROUND(AVG(OrderAmount), 2) AS AverageRevenue,
   MIN(OrderAmount) AS SmallestOrder,
   MAX(OrderAmount) AS LargestOrder
-FROM Orders
-WHERE OrderDate >= '2025-01-01'
-GROUP BY Category
-HAVING COUNT(*) >= 5
-   AND AVG(OrderAmount) > 100.00;
-```
-
-In this query:
-
-- `WHERE` removes rows before aggregation.
-- `GROUP BY` creates one group for each `Category`.
-- The aggregate functions calculate metrics for each category.
-- `HAVING` keeps only groups that meet both aggregate conditions.
-
-## Common pitfalls
-
-### `NULL` values in `AVG`
-
-`AVG(column)` ignores `NULL` values. It doesn't treat a missing value as zero.
-For example, the average of `100`, `200`, `300`, and `NULL` is `200`, not
-`150`.
-
-If the business meaning of `NULL` is zero, use
-`AVG(COALESCE(column, 0))`. Otherwise, use the default behavior so that
-missing values don't change the count of observations.
-
-### `COUNT(*)` and `COUNT(column)`
-
-`COUNT(*)` counts rows. `COUNT(column)` counts non-`NULL` values in that
-column. These expressions can return different results:
-
-```sql
-SELECT
-  COUNT(*) AS TotalRows,
-  COUNT(OrderAmount) AS RowsWithAmounts
 FROM Orders;
 ```
 
-Use `COUNT(*)` when you need the number of rows. Use `COUNT(column)` when you
-need the number of rows that contain a value in that column.
+### Global aggregation output table
 
-### Columns that aren't aggregated
+| `TotalOrders` | `OrdersWithAmounts` | `TotalRevenue` | `AverageRevenue` | `SmallestOrder` | `LargestOrder` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 6 | 5 | 1440.00 | 288.00 | 40.00 | 700.00 |
 
-Don't select a column that isn't aggregated or included in `GROUP BY`.
-The database can't determine which value to return when a group contains
-multiple values for that column.
+### Mechanics of individual aggregate functions
 
-If you need a representative value, define how to choose it. For example, use
-an aggregate function, a window function, or a separate query that selects
-the first or last row according to an explicit ordering.
+- `COUNT(*)`: returns `6`, counting every record in the table regardless of null values.
+- `COUNT(OrderAmount)`: returns `5`, skipping order `104` because its amount is `NULL`.
+- `SUM(OrderAmount)`: calculates `300 + 700 + 40 + 150 + 250 = 1440.00`, ignoring null values.
+- `AVG(OrderAmount)`: divides `1440.00` by `5` rather than `6`, computing `288.00`.
+- `MIN(OrderAmount)` and `MAX(OrderAmount)`: evaluate the smallest and largest non-null values, returning `40.00` and `700.00`.
 
-### Aggregate conditions in `WHERE`
+## Grouping with `GROUP BY`
 
-Don't put aggregate conditions in `WHERE`:
-
-```sql
--- Invalid
-WHERE SUM(OrderAmount) > 1000
-```
-
-Use `HAVING`:
+The `GROUP BY` clause divides the row stream into buckets sharing identical values in the grouping columns. The engine computes aggregates independently for each bucket.
 
 ```sql
-HAVING SUM(OrderAmount) > 1000
-```
-
-The database evaluates `WHERE` before it forms groups, so aggregate values
-don't exist at that stage.
-
-### Row filters in `HAVING`
-
-Avoid using `HAVING` for conditions that apply to individual rows:
-
-```sql
--- Less efficient when the condition can be applied before grouping
+SELECT
+  Category,
+  COUNT(*) AS OrderCount,
+  COUNT(OrderAmount) AS PaidOrderCount,
+  COALESCE(SUM(OrderAmount), 0.00) AS CategoryRevenue,
+  ROUND(COALESCE(AVG(OrderAmount), 0.00), 2) AS CategoryAvg
+FROM Orders
 GROUP BY Category
-HAVING Category = 'Electronics'
+ORDER BY CategoryRevenue DESC;
 ```
 
-Prefer:
+### Grouped output table
+
+| `Category` | `OrderCount` | `PaidOrderCount` | `CategoryRevenue` | `CategoryAvg` |
+| :--- | :--- | :--- | :--- | :--- |
+| Electronics | 2 | 2 | 1000.00 | 500.00 |
+| Clothing | 2 | 2 | 400.00 | 200.00 |
+| Books | 2 | 1 | 40.00 | 40.00 |
+
+### The mandatory `GROUP BY` projection rule
+
+Every column in the `SELECT` projection list must satisfy one of two rules:
+
+1. The column appears in the `GROUP BY` clause.
+2. The column resides inside an aggregate function.
+
+Selecting a bare column that isn't grouped causes a relational ambiguity error:
 
 ```sql
+-- INVALID: The database rejects this query in standard SQL
+SELECT Category, OrderDate, SUM(OrderAmount)
+FROM Orders
+GROUP BY Category;
+```
+
+Because `Electronics` contains two distinct dates on 2026-01-10 and 2026-01-15, the engine can't decide which date to display for the consolidated row.
+
+## Logical execution pipeline: `WHERE` versus `HAVING`
+
+Understanding how `WHERE`, `GROUP BY`, and `HAVING` interact requires inspecting the internal logical query processing order.
+
+```mermaid
+---
+title: Logical query processing order
+---
+flowchart LR
+    F["1. FROM<br/>Read source tables"] --> W["2. WHERE<br/>Filter individual rows"]
+    W --> G["3. GROUP BY<br/>Partition rows into buckets"]
+    G --> A["4. AGGREGATE<br/>Calculate SUM, COUNT, AVG"]
+    A --> H["5. HAVING<br/>Filter aggregated buckets"]
+    H --> S["6. SELECT<br/>Project output columns"]
+    S --> O["7. ORDER BY<br/>Sort final rows"]
+```
+
+### End-to-end pipeline demonstration
+
+Consider this query filtering by date and aggregate revenue:
+
+```sql
+SELECT
+  Category,
+  COUNT(*) AS TotalOrders,
+  SUM(OrderAmount) AS TotalRevenue
+FROM Orders
+WHERE OrderDate >= '2026-01-01'
+GROUP BY Category
+HAVING SUM(OrderAmount) > 100.00
+ORDER BY TotalRevenue DESC;
+```
+
+#### Step 1: `WHERE` filters raw rows
+
+The engine evaluates `OrderDate >= '2026-01-01'`. Order `105` has a date of `2025-12-28`, so the engine eliminates it immediately. Five rows remain:
+
+| `OrderID` | `Category` | `OrderAmount` | `OrderDate` |
+| :--- | :--- | :--- | :--- |
+| 101 | Electronics | 300.00 | 2026-01-10 |
+| 102 | Electronics | 700.00 | 2026-01-15 |
+| 103 | Books | 40.00 | 2026-01-20 |
+| 104 | Books | `NULL` | 2026-02-01 |
+| 106 | Clothing | 250.00 | 2026-02-14 |
+
+#### Step 2: `GROUP BY` forms intermediate buckets
+
+The engine groups the surviving rows by `Category`:
+
+- **Electronics bucket**: orders 101, 102
+- **Books bucket**: orders 103, 104
+- **Clothing bucket**: order 106
+
+#### Step 3: calculation of aggregate values
+
+- Electronics: `COUNT(*) = 2`, `SUM(OrderAmount) = 1000.00`
+- Books: `COUNT(*) = 2`, `SUM(OrderAmount) = 40.00`
+- Clothing: `COUNT(*) = 1`, `SUM(OrderAmount) = 250.00`
+
+#### Step 4: `HAVING` filters aggregate buckets
+
+The engine evaluates `SUM(OrderAmount) > 100.00`:
+
+- Electronics with `1000.00 > 100.00`: passes.
+- Clothing with `250.00 > 100.00`: passes.
+- Books with `40.00 > 100.00`: fails, so the engine discards it.
+
+#### Step 5: `SELECT` and `ORDER BY` produce the final output
+
+| `Category` | `TotalOrders` | `TotalRevenue` |
+| :--- | :--- | :--- |
+| Electronics | 2 | 1000.00 |
+| Clothing | 1 | 250.00 |
+
+## Common pitfalls
+
+### Placing row filters in `HAVING` instead of `WHERE`
+
+A `HAVING` clause can technically filter by un-aggregated columns if they're present in `GROUP BY`, but doing so forces the database to group unnecessary data before discarding it:
+
+```sql
+-- Inefficient: groups all rows before discarding categories
+SELECT Category, SUM(OrderAmount)
+FROM Orders
+GROUP BY Category
+HAVING Category = 'Electronics';
+
+-- Efficient: filters rows before performing the group and aggregate pass
+SELECT Category, SUM(OrderAmount)
+FROM Orders
 WHERE Category = 'Electronics'
-GROUP BY Category
+GROUP BY Category;
 ```
 
-The `WHERE` version can discard rows before grouping. This can reduce memory
-use and execution time, especially for large tables. The actual performance
-depends on the database engine, indexes, and query plan.
+Filtering with `WHERE` reduces memory consumption and leverages table indexes.
+
+### Placing aggregate expressions in `WHERE`
+
+Attempting to filter by an aggregate in `WHERE` triggers a compilation error:
+
+```sql
+-- INVALID: Aggregates are forbidden in WHERE
+SELECT Category, SUM(OrderAmount)
+FROM Orders
+WHERE SUM(OrderAmount) > 500.00
+GROUP BY Category;
+```
+
+Because `WHERE` executes before groups exist, the engine hasn't calculated the aggregate value yet. Always place aggregate thresholds in `HAVING`.
 
 ## Key takeaways
 
-- Aggregate functions summarize values across rows.
-- `COUNT(*)` counts rows, while `COUNT(column)` counts non-`NULL` values.
-- `GROUP BY` creates one result group for each distinct group key.
-- Every selected non-aggregate expression must appear in `GROUP BY`.
-- Use `WHERE` to filter rows before aggregation.
-- Use `HAVING` to filter groups after aggregation.
-- Handle `NULL` values explicitly when they affect business calculations.
+- Use global aggregate functions to compute summary metrics across an entire table.
+- `COUNT(*)` counts rows, while `COUNT(column)` and `AVG(column)` skip null values.
+- Every non-aggregated column in the `SELECT` list must appear in the `GROUP BY` clause.
+- `WHERE` filters input records before grouping occurs.
+- `HAVING` filters aggregated group records after grouping completes.
+- Always apply row filters in `WHERE` rather than `HAVING` to minimize memory pressure and query run times.

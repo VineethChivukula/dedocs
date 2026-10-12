@@ -2,199 +2,122 @@
 
 ## Overview
 
-A common table expression is a temporary, named result set that exists for one
-SQL statement. Define one with the `WITH` clause, then reference it
-from the statement that follows.
+A common table expression is a temporary, named result set defined within the execution scope of a single SQL statement. Introduced using the `WITH` clause, common table expressions improve query modularity, readability, and maintainability by decomposing complex multi-table joins and aggregations into sequential, logical steps.
 
-Common table expressions, nested queries, and temporary tables all help
-organize intermediate results, but they have different scopes and
-capabilities. This guide focuses on non-recursive common table expressions and
-compares them with nested queries and temporary tables.
+This guide provides an operational reference for common table expressions, comparing them with nested queries and temporary tables, exploring optimizer `inlining` versus materialization boundaries, and analyzing query performance.
 
-## Non-recursive common table expressions
+## Example datasets
 
-A non-recursive common table expression has this form:
+The queries in this guide use the following `Departments` and `Orders` tables:
+
+### `Departments` table
+
+| `DepartmentID` | `DepartmentName` |
+| :--- | :--- |
+| 10 | Engineering |
+| 20 | Marketing |
+| 30 | Operations |
+
+### `Orders` table
+
+| `OrderID` | `DepartmentID` | `OrderAmount` |
+| :--- | :--- | :--- |
+| 101 | 10 | 60000.00 |
+| 102 | 10 | 50000.00 |
+| 103 | 20 | 45000.00 |
+| 104 | 30 | 20000.00 |
+| 105 | 30 | 30000.00 |
+
+## Structure and chaining of common table expressions
+
+A common table expression definition precedes the main `SELECT`, `INSERT`, `UPDATE`, or `DELETE` statement:
 
 ```sql
 WITH cte_name AS (
-  SELECT
-    column1,
-    column2
+  SELECT column1, column2
   FROM source_table
 )
-SELECT
-  column1,
-  column2
+SELECT column1, column2
 FROM cte_name;
 ```
 
-The common table expression definition appears at the beginning of a
-`SELECT`, `INSERT`, `UPDATE`, or `DELETE` statement. The main statement and
-other definitions in the same `WITH` clause can reference it.
+### Sequential pipeline chaining
 
-### Scope and lifetime
-
-A common table expression exists only while its statement runs. The database
-discards the result after the statement completes. You can't reference it from
-a later, independent statement.
-
-### Readability and composition
-
-Common table expressions let you name intermediate steps and read a
-transformation from top to bottom. You can define multiple expressions in one
-`WITH` clause, and a later expression can reference an earlier one:
+You can declare multiple comma-separated expressions within a single `WITH` block. Downstream expressions can reference any previously defined expression, creating a clean linear data pipeline:
 
 ```sql
-WITH department_totals AS (
+WITH DepartmentTotals AS (
+  -- Step 1: Calculate total sales and average order per department
   SELECT
     DepartmentID,
-    SUM(OrderAmount) AS TotalSales
+    SUM(OrderAmount) AS TotalSales,
+    ROUND(AVG(OrderAmount), 2) AS AvgOrderValue
   FROM Orders
   GROUP BY DepartmentID
 ),
-large_departments AS (
+HighVolumeDepartments AS (
+  -- Step 2: Filter for departments exceeding 50,000 in revenue
   SELECT
     DepartmentID,
-    TotalSales
-  FROM department_totals
-  WHERE TotalSales > 100000
+    TotalSales,
+    AvgOrderValue
+  FROM DepartmentTotals
+  WHERE TotalSales > 50000.00
 )
-SELECT
-  DepartmentID,
-  TotalSales
-FROM large_departments;
-```
-
-Use descriptive names that explain the result or transformation. Avoid
-creating a long chain of expressions when a shorter query would be clearer.
-
-## Nested queries
-
-A nested query is a query inside another SQL statement. You can use one in a
-`FROM`, `WHERE`, `HAVING`, or `SELECT` clause.
-
-For example, this nested query creates an inline result for the outer query:
-
-```sql
+-- Step 3: Join filtered results with department metadata
 SELECT
   d.DepartmentName,
-  totals.TotalSales
-FROM Departments AS d
-JOIN (
-  SELECT
-    DepartmentID,
-    SUM(OrderAmount) AS TotalSales
-  FROM Orders
-  GROUP BY DepartmentID
-  HAVING SUM(OrderAmount) > 100000
-) AS totals
-  ON d.DepartmentID = totals.DepartmentID;
+  h.TotalSales,
+  h.AvgOrderValue
+FROM HighVolumeDepartments AS h
+INNER JOIN Departments AS d
+  ON h.DepartmentID = d.DepartmentID
+ORDER BY h.TotalSales DESC;
 ```
 
-Nested queries are local to the clause or expression where they appear. They
-can be independent of the outer query or correlated with it. Deeply nested
-queries can become difficult to read, especially when the same logic appears
-in several places.
+#### Query output table
 
-Use a nested query when the intermediate result is short, local to one part
-of the statement, and unlikely to need a separate name.
+| `DepartmentName` | `TotalSales` | `AvgOrderValue` |
+| :--- | :--- | :--- |
+| Engineering | 110000.00 | 55000.00 |
 
-## Temporary tables
+#### Step-by-step pipeline execution
 
-A temporary table is a table stored in a database-managed temporary
-workspace. Create one with syntax that depends on the database engine:
+1. `DepartmentTotals` aggregates `Orders`, yielding:
+   - Department 10: `TotalSales = 110000.00`, `AvgOrderValue = 55000.00`
+   - Department 20: `TotalSales = 45000.00`, `AvgOrderValue = 45000.00`
+   - Department 30: `TotalSales = 50000.00`, `AvgOrderValue = 25000.00`
+2. `HighVolumeDepartments` evaluates `TotalSales > 50000.00`, retaining only Department 10.
+3. The outer query joins Department 10 with `Departments`, projecting `Engineering`.
 
-```sql
-CREATE TEMPORARY TABLE TempDepartmentSales AS
-SELECT
-  DepartmentID,
-  SUM(OrderAmount) AS TotalSales
-FROM Orders
-GROUP BY DepartmentID;
+## Architectural comparison: common table expressions, nested queries, and temporary tables
+
+SQL offers three distinct approaches for managing intermediate result sets:
+
+```mermaid
+---
+title: Intermediate result set options
+---
+flowchart TD
+    CTE["Common Table Expression (CTE)<br/>Scope: Single statement<br/>Storage: Inlined or ephemeral memory spool<br/>Use: Readable pipelines and recursion"]
+    Sub["Nested Query (Subquery)<br/>Scope: Single clause<br/>Storage: Inlined by query optimizer<br/>Use: Compact local expressions"]
+    Temp["Temporary Table<br/>Scope: Session or transaction<br/>Storage: Physical disk or tempdb space<br/>Use: Multi-statement reuse and indexing"]
 ```
 
-Multiple statements can usually reference temporary tables during
-their session or transaction scope. The exact lifetime depends on the
-database engine and table definition. A temporary table might disappear when
-the session ends, when a transaction commits, or when you explicitly drop it.
-
-Because a temporary table is a physical relation, many database engines let
-you:
-
-- Create indexes on it.
-- Collect or update statistics.
-- Use it across several statements.
-- Inspect or transform its contents between steps.
-
-Use a temporary table when an intermediate result is large, needs indexes or
-statistics, or several statements must use it.
-
-## Compare the approaches
+### Feature comparison matrix
 
 | Characteristic | Common table expression | Nested query | Temporary table |
-| --- | --- | --- | --- |
-| Lifetime | One statement. | One clause or expression. | Engine-defined session or transaction scope. |
-| Reuse across statements | No. | No. | Usually yes. |
-| Readability | Often high for multi-step logic. | Good for small local logic. | Requires multiple statements. |
-| Direct indexing | No. | No. | Usually yes. |
-| Standalone statistics | No. | No. | Often yes. |
-| Storage and materialization | Engine-dependent. | Engine-dependent. | Materialized storage. |
-| Cleanup | Automatic after the statement. | Automatic after the statement. | Automatic or explicit, depending on the engine. |
+| :--- | :--- | :--- | :--- |
+| **Lifecycle** | Single statement | Single clause | Session or transaction |
+| **Cross-statement reuse** | No | No | Yes |
+| **Code readability** | High: top-to-bottom pipeline | Low: deeply nested brackets | Moderate: separated SQL steps |
+| **Explicit indexing** | No | No | Yes: create clustered or secondary indexes |
+| **Database statistics** | Derived from source tables | Derived from source tables | Engine computes standalone statistics |
+| **Physical cleanup** | Automatic at statement completion | Automatic at clause completion | Explicit `DROP TABLE` or session disconnect |
 
-This table describes common behavior, not a universal implementation rule.
-Check your database engine's documentation for materialization, scope,
-statistics, and cleanup behavior.
+### Implementing the same requirement across all three methods
 
-## Performance considerations
-
-### Query-plan integration
-
-The optimizer can often combine a nested query or non-recursive common table
-expression with the surrounding query plan. This can allow early filtering and join
-reordering, and other optimizations.
-
-This behavior is engine-dependent. A common table expression is a query
-construct, and the database might materialize or reuse its result.
-
-### Materialized common table expressions
-
-Some database engines support a materialization option for a common table
-expression. The database evaluates and stores the result before the
-outer query continues.
-
-Materialization can avoid repeated work when several queries use a result. It
-can also prevent outer filters from moving into the expression, which can
-cause the database to process more rows than necessary. Use this option only
-when the execution plan and workload support it.
-
-### Repeated references
-
-When a query references a common table expression more than once, the database
-engine might combine its definition, materialize it once, or evaluate parts of it more than once. The
-choice depends on the optimizer and the database version.
-
-If repeated evaluation is expensive, compare the expression with a temporary
-table.
-Measure both versions with an execution plan and representative data.
-
-### Indexes and statistics
-
-Common table expressions and nested queries don't have independent indexes or
-statistics. The optimizer estimates their results from the underlying tables
-and expressions.
-
-Temporary tables can usually have indexes and statistics. For a large
-intermediate result that participates in several joins, an index, or updated
-statistics can improve the plan. The benefit depends on the database engine,
-data distribution, and query shape.
-
-## Complete example
-
-Suppose you need to find departments whose total sales exceed 100,000,
-calculate their average order value, and join the result with department
-metadata.
-
-### Use a nested query
+#### Approach 1 - nested query
 
 ```sql
 SELECT
@@ -202,128 +125,125 @@ SELECT
   totals.TotalSales,
   totals.AvgOrderValue
 FROM Departments AS d
-JOIN (
+INNER JOIN (
   SELECT
     DepartmentID,
     SUM(OrderAmount) AS TotalSales,
-    AVG(OrderAmount) AS AvgOrderValue
+    ROUND(AVG(OrderAmount), 2) AS AvgOrderValue
   FROM Orders
   GROUP BY DepartmentID
-  HAVING SUM(OrderAmount) > 100000
+  HAVING SUM(OrderAmount) > 50000.00
 ) AS totals
   ON d.DepartmentID = totals.DepartmentID;
 ```
 
-### Use a common table expression
+#### Approach 2 - common table expression
 
 ```sql
-WITH department_sales AS (
+WITH TargetDepartmentSales AS (
   SELECT
     DepartmentID,
     SUM(OrderAmount) AS TotalSales,
-    AVG(OrderAmount) AS AvgOrderValue
+    ROUND(AVG(OrderAmount), 2) AS AvgOrderValue
   FROM Orders
   GROUP BY DepartmentID
-  HAVING SUM(OrderAmount) > 100000
+  HAVING SUM(OrderAmount) > 50000.00
 )
 SELECT
   d.DepartmentName,
   s.TotalSales,
   s.AvgOrderValue
 FROM Departments AS d
-JOIN department_sales AS s
+INNER JOIN TargetDepartmentSales AS s
   ON d.DepartmentID = s.DepartmentID;
 ```
 
-The common table expression version gives the intermediate result a name and separates the
-aggregation from the final join. Both versions can produce the same execution
-plan.
-
-### Use a temporary table
+#### Approach 3 - temporary table
 
 ```sql
-CREATE TEMPORARY TABLE TempDepartmentSales AS
+CREATE TEMPORARY TABLE TempTargetSales AS
 SELECT
   DepartmentID,
   SUM(OrderAmount) AS TotalSales,
-  AVG(OrderAmount) AS AvgOrderValue
+  ROUND(AVG(OrderAmount), 2) AS AvgOrderValue
 FROM Orders
 GROUP BY DepartmentID
-HAVING SUM(OrderAmount) > 100000;
+HAVING SUM(OrderAmount) > 50000.00;
 
-CREATE INDEX idx_temp_department_sales
-  ON TempDepartmentSales (DepartmentID);
+CREATE INDEX idx_temp_dept ON TempTargetSales (DepartmentID);
 
 SELECT
   d.DepartmentName,
   t.TotalSales,
   t.AvgOrderValue
 FROM Departments AS d
-JOIN TempDepartmentSales AS t
+INNER JOIN TempTargetSales AS t
   ON d.DepartmentID = t.DepartmentID;
 
-DROP TABLE TempDepartmentSales;
+DROP TABLE TempTargetSales;
 ```
 
-The temporary-table syntax and index definition vary by database engine.
-Explicitly dropping the table makes cleanup clear, even when the engine also
-removes it automatically.
+All three methods return the exact same output record: `Engineering | 110000.00 | 55000.00`.
+
+## Engine execution: `inlining` versus materialization
+
+How the database engine executes a common table expression depends on its cost-based query optimizer.
+
+### Query `inlining`
+
+In modern database engines, including Google BigQuery, Snowflake, and PostgreSQL 12+, the query optimizer `inlines` non-recursive common table expressions by default.
+
+The optimizer expands the expression definition directly into the parent query, treating it like an internal view. This allows the engine to:
+
+- Push outer `WHERE` predicates down directly into the underlying table scan.
+- Reorder join operations across the boundary.
+- Leverage underlying table indexes.
+
+### Materialization boundaries
+
+When an expression contains non-deterministic functions, complex window calculations, or when a query references it multiple times, the engine might choose to materialize the intermediate result.
+
+The engine evaluates the expression once, writes the intermediate rows to an in-memory or on-disk spool, and reads from that spool during subsequent references.
+
+In PostgreSQL, you can explicitly guide the optimizer:
+
+```sql
+-- Force the engine to materialize the result once:
+WITH CachedResults AS MATERIALIZED (
+  SELECT ...
+)
+
+-- Force the optimizer to inline the query:
+WITH InlineResults AS NOT MATERIALIZED (
+  SELECT ...
+)
+```
 
 ## Common pitfalls
 
-### Assuming one evaluation
+### Assuming a common table expression materializes only once
 
-A common table expression names a query expression, but it doesn't ensure one physical
-evaluation. An optimizer might inline it, materialize it, or evaluate its
-logic more than once.
+Don't assume the database computes an expression only once if you reference it multiple times in the outer query. In query engines that inline expressions, referencing `MyCTE` three times in joins or unions can execute the underlying query three separate times.
 
-Use an execution plan to determine what the database does. Use a temporary
-table when you need a materialized result that multiple statements can reuse.
+Verify the execution plan. If multiple evaluations incur heavy I/O or CPU costs, materialize the result into a temporary table first.
 
-### Forcing materialization without checking filter behavior
+### Predicate `pushdown` failure across materialization fences
 
-Materialization can act as an optimization boundary. For example, the
-database might aggregate every department before applying an outer filter for
-one department.
+When an engine materializes an expression, it creates an optimization fence. If the outer query filters by `DepartmentID = 10`, but the materialized expression aggregates the entire table first, the database processes millions of unnecessary rows before applying the filter.
 
-Keep restrictive row filters as close as possible to their source tables.
-Compare the plan with and without materialization before choosing the option.
+Always place restrictive filters directly inside the common table expression rather than relying solely on outer queries.
 
-### Creating temporary tables in high-frequency code
+### Session leaks with temporary tables
 
-Creating and dropping temporary tables can require metadata operations and
-temporary storage allocation. Repeating those operations in a frequently
-called endpoint can add overhead.
+Temporary tables persist across database connection lifetimes. When using connection pooling in backend services, forgetting to drop a temporary table leaves the relation alive in the connection pool. Subsequent requests can experience table name collisions or exhaust temporary memory space.
 
-Use a common table expression or nested query for small, one-statement transformations. Use a
-temporary table when its reuse or indexing benefits justify the setup cost.
-
-### Using stale temporary-table statistics
-
-After populating a large temporary table, the optimizer might have inaccurate
-row-count estimates. Depending on the database engine, run the appropriate
-statistics command before an important join, such as `ANALYZE`.
-
-Inspect the execution plan to confirm that the optimizer chooses an
-appropriate join strategy.
-
-### Leaking temporary tables through connection pools
-
-Connection pools reuse database connections. If a temporary table lasts for
-the connection lifetime and code doesn't drop it, a later request can see a
-name collision or consume unnecessary temporary storage.
-
-Use unique names where required, drop temporary tables in cleanup code, and
-confirm the lifetime rules for the database engine and connection settings.
+Always include explicit `DROP TABLE IF EXISTS` calls in execution cleanup blocks.
 
 ## Key takeaways
 
-- Use a common table expression to name and organize intermediate logic within one statement.
-- Use a nested query for a local intermediate result.
-- Use a temporary table when multiple statements need the result or when it
-  needs indexes or statistics.
-- Don't assume that a common table expression materializes or runs only once.
-- Keep filters close to their source data and verify important choices with an
-  execution plan.
-- Clean up temporary tables explicitly when connection reuse can extend their
-  lifetime.
+- Use common table expressions to decompose complex queries into readable, sequential pipelines.
+- Prefer common table expressions over deeply nested queries to simplify code reviews and maintenance.
+- Use temporary tables when intermediate results require dedicated indexes, updated statistics, or multi-statement reuse.
+- Understand that modern optimizers inline non-recursive common table expressions by default, enabling predicate `pushdown`.
+- Inspect query execution plans to verify whether the optimizer `inlines` or materializes intermediate expressions.
+- Place row filters as close to the raw source tables as possible to prevent processing unneeded data.

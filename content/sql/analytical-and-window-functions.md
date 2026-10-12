@@ -2,351 +2,471 @@
 
 ## Overview
 
-Window functions calculate values across related rows without collapsing those
-rows into one summary row. Unlike `GROUP BY`, a window function returns a
-value for each input row and preserves the row-level details in the result.
+Window functions perform calculations across a set of table rows that relate to
+the current query row. Unlike standard `GROUP BY` aggregations, which collapse
+multiple rows into a single summary row, window functions preserve the
+individual row identity and return a computed value alongside every input
+record.
 
-This guide introduces the `OVER` clause, window partitions, window ordering,
-ranking functions, and running aggregates.
+This guide provides an end-to-end operational reference for window functions,
+covering the `OVER` clause, partitioning, ordering, ranking functions, the
+sliding frame clause, and real-world query execution mechanics.
 
-## Window definitions
+## Example dataset
 
-A window definition specifies which rows to use for each calculation.
-It appears inside the `OVER` clause:
+The queries in this guide use the following `EmployeeSales` table, which
+includes intentional duplicate sales amounts and duplicate dates to illustrate
+tie-breaking and frame behavior:
+
+| `EmployeeID` | `EmployeeName` | `Department` | `SalesAmount` | `HireDate` |
+| :--- | :--- | :--- | :--- | :--- |
+| 101 | Alice | Sales | 10000 | 2024-01-15 |
+| 102 | Bob | Sales | 8000 | 2024-03-01 |
+| 103 | Charlie | Sales | 8000 | 2024-03-01 |
+| 104 | Diana | Sales | 5000 | 2024-06-10 |
+| 201 | Evan | Engineering | 12000 | 2023-11-01 |
+| 202 | Fiona | Engineering | 9000 | 2024-02-15 |
+| 203 | George | Engineering | 9000 | 2024-04-20 |
+| 204 | Hannah | Engineering | 7500 | 2024-05-12 |
+
+## Window syntax and the `OVER` clause
+
+A window specification defines the subset of rows and their ordering for each
+row calculation. It appears inside the `OVER` clause:
 
 ```sql
-function_name() OVER (
-  PARTITION BY partition_column
-  ORDER BY sort_column
+function_name([arguments]) OVER (
+  [PARTITION BY partition_column, ...]
+  [ORDER BY sort_column [ASC | DESC], ...]
+  [ROWS | RANGE frame_specification]
 )
 ```
 
-The `PARTITION BY` and `ORDER BY` clauses are optional, but each one changes
-the set or order of rows that the function uses.
+The `OVER` clause instructs the query processor to evaluate the function as a
+window function rather than a standard scalar or grouped aggregate function.
 
-### `OVER`
+```mermaid
+---
+title: Window evaluation workflow
+---
+flowchart LR
+    A["Raw Input Rows"] --> B["PARTITION BY<br/>Divide into independent subsets"]
+    B --> C["ORDER BY<br/>Sort rows inside partition"]
+    C --> D["Frame Clause<br/>Slide boundary relative to current row"]
+    D --> E["Compute Window Function<br/>Output value per row"]
+```
 
-The `OVER` clause changes a function from a regular aggregate into a window
-function. A regular aggregate such as `SUM(SalesAmount)` returns one value per
-group. `SUM(SalesAmount) OVER (...)` returns a value for every row in the
-window.
+### Global windows without partitions
 
-For example, this query returns each employee, along with the total sales for
-the entire result:
+When the `OVER` clause contains no `PARTITION BY` clause, the window
+encompasses the entire result set returned by the query:
 
 ```sql
 SELECT
+  EmployeeID,
   EmployeeName,
+  Department,
   SalesAmount,
-  SUM(SalesAmount) OVER () AS TotalSales
+  SUM(SalesAmount) OVER () AS CompanyTotalSales,
+  ROUND(SalesAmount * 100.0 / SUM(SalesAmount) OVER (), 2) AS PctOfCompanySales
 FROM EmployeeSales;
 ```
 
-Because the `OVER` clause has no `PARTITION BY`, the database treats all
-selected rows as one window.
+#### Global window sales output
 
-### `PARTITION BY`
+| `EmployeeID` | `EmployeeName` | `Department` | `SalesAmount` | `CompanyTotalSales` | `PctOfCompanySales` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 101 | Alice | Sales | 10000 | 68500 | 14.60 |
+| 102 | Bob | Sales | 8000 | 68500 | 11.68 |
+| 103 | Charlie | Sales | 8000 | 68500 | 11.68 |
+| 104 | Diana | Sales | 5000 | 68500 | 7.30 |
+| 201 | Evan | Engineering | 12000 | 68500 | 17.52 |
+| 202 | Fiona | Engineering | 9000 | 68500 | 13.14 |
+| 203 | George | Engineering | 9000 | 68500 | 13.14 |
+| 204 | Hannah | Engineering | 7500 | 68500 | 10.95 |
 
-`PARTITION BY` divides the result into logical groups. The window function
-calculates a separate result for each partition.
+The query calculates `CompanyTotalSales` across all eight rows without
+collapsing them, allowing each employee row to retain its individual sales
+percentage.
 
-This query calculates a department total while preserving every employee row:
+### Partitioned window: departmental aggregates
+
+The `PARTITION BY` clause divides the row stream into logical partitions.
+The database calculates the window function independently for each partition:
 
 ```sql
 SELECT
-  Department,
+  EmployeeID,
   EmployeeName,
+  Department,
   SalesAmount,
   SUM(SalesAmount) OVER (
     PARTITION BY Department
-  ) AS DepartmentSales
+  ) AS DepartmentTotalSales,
+  ROUND(SalesAmount * 100.0 / SUM(SalesAmount) OVER (
+    PARTITION BY Department
+  ), 2) AS PctOfDeptSales
 FROM EmployeeSales;
 ```
 
-If you omit `PARTITION BY`, the database uses one partition containing all
-rows in the result.
+#### Departmental partitioned sales output
 
-### `ORDER BY`
+| `EmployeeID` | `EmployeeName` | `Department` | `SalesAmount` | `DepartmentTotalSales` | `PctOfDeptSales` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 201 | Evan | Engineering | 12000 | 37500 | 32.00 |
+| 202 | Fiona | Engineering | 9000 | 37500 | 24.00 |
+| 203 | George | Engineering | 9000 | 37500 | 24.00 |
+| 204 | Hannah | Engineering | 7500 | 37500 | 20.00 |
+| 101 | Alice | Sales | 10000 | 31000 | 32.26 |
+| 102 | Bob | Sales | 8000 | 31000 | 25.81 |
+| 103 | Charlie | Sales | 8000 | 31000 | 25.81 |
+| 104 | Diana | Sales | 5000 | 31000 | 16.13 |
 
-`ORDER BY` inside `OVER` defines the logical order of rows within each
-partition. Ranking functions use this order to assign ranks. Aggregate window
-functions can also use it to calculate running values.
+Rows in `Engineering` calculate their share against the departmental total of
+`37500`, while rows in `Sales` calculate against `31000`.
 
-For example:
+## Window ordering and running values
 
-```sql
-SUM(SalesAmount) OVER (
-  PARTITION BY Department
-  ORDER BY HireDate
-) AS RunningDepartmentSales
-```
+Adding `ORDER BY` to an `OVER` clause defines the sequence in which the engine
+processes rows inside each partition.
 
-For aggregate window functions, adding `ORDER BY` usually creates a cumulative
-frame that starts at the first row and ends at the current row. The exact
-default frame can vary by database engine and function. Specify an explicit
-frame when the distinction between peer rows and individual rows matters.
-
-For example, this frame uses every row from the start of the partition through
-the current row:
-
-```sql
-SUM(SalesAmount) OVER (
-  PARTITION BY Department
-  ORDER BY HireDate
-  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-) AS RunningDepartmentSales
-```
-
-Add a tie-breaker to make the order deterministic:
+For aggregate window functions, adding `ORDER BY` without a frame clause
+changes the calculation from a static group total into a cumulative running
+total.
 
 ```sql
-ORDER BY SalesAmount DESC, EmployeeName, EmployeeID
+SELECT
+  EmployeeID,
+  EmployeeName,
+  Department,
+  HireDate,
+  SalesAmount,
+  SUM(SalesAmount) OVER (
+    PARTITION BY Department
+    ORDER BY HireDate
+  ) AS CumulativeDeptSales
+FROM EmployeeSales;
 ```
+
+### The default frame trap: `RANGE` versus `ROWS`
+
+In standard SQL specifications, omitting an explicit frame clause when
+`ORDER BY` is present triggers an implicit default:
+
+```sql
+RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+```
+
+This default introduces subtle bugs when duplicate values exist in the
+`ORDER BY` expression. `RANGE` evaluates peer rows—rows that share the
+identical sort value—as a single combined unit.
+
+Notice how Bob and Charlie share the exact same `HireDate` on 2024-03-01:
+
+```sql
+SELECT
+  EmployeeName,
+  SalesAmount,
+  HireDate,
+  -- Default implicit RANGE frame:
+  SUM(SalesAmount) OVER (
+    ORDER BY HireDate
+    RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS RangeRunningTotal,
+  -- Explicit physical ROWS frame:
+  SUM(SalesAmount) OVER (
+    ORDER BY HireDate, EmployeeID
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS RowsRunningTotal
+FROM EmployeeSales
+WHERE Department = 'Sales';
+```
+
+#### Comparison of `RANGE` versus `ROWS` execution
+
+| `EmployeeName` | `SalesAmount` | `HireDate` | `RangeRunningTotal` | `RowsRunningTotal` |
+| :--- | :--- | :--- | :--- | :--- |
+| Alice | 10000 | 2024-01-15 | 10000 | 10000 |
+| Bob | 8000 | 2024-03-01 | **26000** | 18000 |
+| Charlie | 8000 | 2024-03-01 | **26000** | 26000 |
+| Diana | 5000 | 2024-06-10 | 31000 | 31000 |
+
+The database groups Bob and Charlie together under `RANGE` because their
+hire dates tie. The running total jumps directly to `26000`, summing 10000,
+8000, and 8000 for both rows. Under `ROWS`, the engine advances row by row,
+producing `18000` then `26000`.
+
+> [!NOTE]
+> Always declare an explicit frame using
+> `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` and supply a unique
+> tie-breaker column when computing deterministic running totals.
 
 ## Ranking functions
 
-Ranking functions assign a position or bucket to each row in a partition.
+Ranking functions assign an ordinal rank, index, or bucket number to each row
+inside a partition.
 
-### `ROW_NUMBER`
+The four primary ranking functions handle duplicate values and ties
+differently:
 
-`ROW_NUMBER()` assigns a unique sequential integer to every row. It starts at
-1 within each partition:
+1. `ROW_NUMBER()`: assigns a unique, strictly incrementing integer such as
+   `1, 2, 3, 4` to each row in the partition.
+2. `RANK()`: assigns the same rank to identical sort values, but skips
+   subsequent rank numbers to account for ties, producing sequences such as
+   `1, 2, 2, 4`.
+3. `DENSE_RANK()`: assigns the same rank to identical sort values without
+   leaving gaps in the numbering sequence, producing sequences such as
+   `1, 2, 2, 3`.
+4. `NTILE(n)`: divides the ordered rows in each partition into `n` roughly equal
+   buckets, returning the bucket index from `1` through `n`.
 
-```sql
-ROW_NUMBER() OVER (
-  PARTITION BY Department
-  ORDER BY SalesAmount DESC, EmployeeID
-) AS RowNumber
-```
+### Ranking comparison query
 
-Use `ROW_NUMBER` for pagination, duplicate removal, or selecting one row from
-each group. Include enough tie-breaker columns in `ORDER BY` to define which
-row comes first.
-
-### `RANK`
-
-`RANK()` assigns the same rank to rows with equal ordering values. It leaves
-gaps after ties. If two rows share rank 1, the next row receives rank 3.
-
-```sql
-RANK() OVER (
-  PARTITION BY Department
-  ORDER BY SalesAmount DESC
-) AS SalesRank
-```
-
-Use `RANK` when tied rows should share a competition-style position.
-
-### `DENSE_RANK`
-
-`DENSE_RANK()` also assigns the same rank to tied rows, but it doesn't leave
-gaps. If two rows share rank 1, the next distinct value receives rank 2.
-
-```sql
-DENSE_RANK() OVER (
-  PARTITION BY Department
-  ORDER BY SalesAmount DESC
-) AS DenseSalesRank
-```
-
-Use `DENSE_RANK` when you need consecutive ranks while preserving ties.
-
-### `NTILE`
-
-`NTILE(n)` divides the ordered rows in each partition into `n` buckets and
-returns the bucket number for each row. The database distributes rows as
-evenly as possible.
-
-```sql
-NTILE(4) OVER (
-  PARTITION BY Department
-  ORDER BY SalesAmount DESC
-) AS PerformanceQuartile
-```
-
-The bucket numbers range from 1 through `n`. If the number of rows isn't
-evenly divisible by `n`, some buckets contain one more row than others.
-
-## Compare ranking functions
-
-| Function | Ties | Gaps | Common use |
-| --- | --- | --- | --- |
-| `ROW_NUMBER()` | Assigns a different number to every row. | No gaps. | Pagination and duplicate removal. |
-| `RANK()` | Tied rows share a rank. | Leaves gaps after ties. | Competition ranking. |
-| `DENSE_RANK()` | Tied rows share a rank. | No gaps after ties. | Top-N results with ties. |
-| `NTILE(n)` | Assigns rows to buckets. | Bucket numbers remain consecutive. | Quartiles and other groups. |
-
-## Complete example
-
-Suppose that an `EmployeeSales` table contains `Department`,
-`EmployeeName`, `EmployeeID`, `SalesAmount`, and `HireDate`. The following
-query calculates several metrics for each employee:
+The following query compares all four ranking functions on the `Sales`
+department records:
 
 ```sql
 SELECT
-  Department,
   EmployeeName,
   SalesAmount,
   ROW_NUMBER() OVER (
-    PARTITION BY Department
     ORDER BY SalesAmount DESC, EmployeeID
   ) AS RowNumber,
   RANK() OVER (
-    PARTITION BY Department
     ORDER BY SalesAmount DESC
-  ) AS SalesRank,
+  ) AS StandardRank,
   DENSE_RANK() OVER (
-    PARTITION BY Department
     ORDER BY SalesAmount DESC
-  ) AS DenseSalesRank,
+  ) AS DenseRank,
   NTILE(2) OVER (
-    PARTITION BY Department
     ORDER BY SalesAmount DESC, EmployeeID
-  ) AS PerformanceBucket,
-  SUM(SalesAmount) OVER (
-    PARTITION BY Department
-    ORDER BY SalesAmount DESC, EmployeeID
-    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-  ) AS RunningDepartmentSales
-FROM EmployeeSales;
+  ) AS PerformanceHalf
+FROM EmployeeSales
+WHERE Department = 'Sales';
 ```
 
-For the following rows in the `Sales` department:
+#### Side-by-side ranking result
 
-| EmployeeName | SalesAmount |
-| --- | ---: |
-| Alice | 10000 |
-| Bob | 8000 |
-| Charlie | 8000 |
-| Diana | 5000 |
+| `EmployeeName` | `SalesAmount` | `RowNumber` | `StandardRank` | `DenseRank` | `PerformanceHalf` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Alice | 10000 | 1 | 1 | 1 | 1 |
+| Bob | 8000 | 2 | 2 | 2 | 1 |
+| Charlie | 8000 | 3 | 2 | 2 | 2 |
+| Diana | 5000 | 4 | 4 | 3 | 2 |
 
-The ranking and running-total columns are:
+#### Analysis of tie handling
 
-| EmployeeName | `ROW_NUMBER` | `RANK` | `DENSE_RANK` | `NTILE(2)` | Running sales |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Alice | 1 | 1 | 1 | 1 | 10000 |
-| Bob | 2 | 2 | 2 | 1 | 18000 |
-| Charlie | 3 | 2 | 2 | 2 | 26000 |
-| Diana | 4 | 4 | 3 | 2 | 31000 |
+- **Tie condition**: sales amounts for Bob and Charlie tie at `8000`.
+- **Row numbering**: `ROW_NUMBER()` breaks the tie using `EmployeeID`, giving
+  Bob `2` and Charlie `3`.
+- **Standard ranking**: `RANK()` assigns both employees rank `2`. Because two
+  rows tied for rank `2`, the engine skips rank `3`, and Diana receives rank
+  `4`.
+- **Dense ranking**: `DENSE_RANK()` assigns both employees rank `2`. It doesn't
+  skip values, so Diana receives rank `3`.
+- **Bucketing**: `NTILE(2)` splits the four rows into two equal buckets,
+  assigning Alice and Bob to bucket `1` and Charlie and Diana to bucket `2`.
 
-`ROW_NUMBER` uses `EmployeeID` as a tie-breaker in this example. `RANK` and
-`DENSE_RANK` use only `SalesAmount`, so Bob and Charlie share the same rank.
+## Sliding window frame specifications
 
-## Filtering window-function results
+A frame clause defines a dynamic window subset that slides relative to the
+current row.
 
-You can't reference a window function directly in the `WHERE` or `HAVING`
-clause at the same query level because those clauses run before the `SELECT`
-list runs. Compute the window value in a nested query or common table
-expression, then filter it in an outer query.
+### Frame boundary keywords
 
-For example, to return the top 3 employees in each department:
+- `UNBOUNDED PRECEDING`: starts at the first row of the partition.
+- `n PRECEDING`: starts `n` rows before the current row.
+- `CURRENT ROW`: limits the boundary to the active evaluation row.
+- `n FOLLOWING`: extends `n` rows after the current row.
+- `UNBOUNDED FOLLOWING`: extends through the final row of the partition.
+
+```mermaid
+---
+title: Sliding window frame structure
+---
+flowchart TD
+    UBP["UNBOUNDED PRECEDING (Partition Start)"]
+    PREV["1 PRECEDING"]
+    CURR["CURRENT ROW"]
+    NEXT["1 FOLLOWING"]
+    UBF["UNBOUNDED FOLLOWING (Partition End)"]
+
+    UBP --> PREV --> CURR --> NEXT --> UBF
+```
+
+### Centered moving average calculation
+
+To smooth volatility in time-series data, engineers frequently compute a 3-row
+centered moving average: the previous row, the current row, and the following
+row.
 
 ```sql
-WITH ranked_sales AS (
+SELECT
+  EmployeeName,
+  Department,
+  HireDate,
+  SalesAmount,
+  ROUND(AVG(SalesAmount) OVER (
+    PARTITION BY Department
+    ORDER BY HireDate
+    ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+  ), 2) AS MovingAverageSales
+FROM EmployeeSales
+WHERE Department = 'Sales';
+```
+
+#### Moving average result
+
+| `EmployeeName` | `HireDate` | `SalesAmount` | Frame rows included | `MovingAverageSales` |
+| :--- | :--- | :--- | :--- | :--- |
+| Alice | 2024-01-15 | 10000 | Alice, Bob | 9000.00 |
+| Bob | 2024-03-01 | 8000 | Alice, Bob, Charlie | 8666.67 |
+| Charlie | 2024-03-01 | 8000 | Bob, Charlie, Diana | 7000.00 |
+| Diana | 2024-06-10 | 5000 | Charlie, Diana | 6500.00 |
+
+On the first row, Alice has no preceding row, so the engine sums 10000 and 8000
+and divides by 2 to yield 9000.00. On the second row, the frame includes Alice,
+Bob, and Charlie: summing 10000, 8000, and 8000 and dividing by 3 yields
+8666.67.
+
+## Filtering window results with common table expressions and `QUALIFY`
+
+Because of the SQL logical query processing order, window functions evaluate
+after `WHERE` and `HAVING` clauses finish filtering.
+
+Attempting to filter window output directly in `WHERE` raises a syntax error:
+
+```sql
+-- INVALID: The database rejects window functions in WHERE clauses
+SELECT EmployeeName, SalesAmount
+FROM EmployeeSales
+WHERE ROW_NUMBER() OVER (ORDER BY SalesAmount DESC) <= 3;
+```
+
+### Top-N filtering with common table expressions
+
+To filter window results, wrap the calculation in a common table expression
+and apply the filter in the outer query:
+
+```sql
+WITH RankedDepartmentSales AS (
   SELECT
     Department,
+    EmployeeID,
     EmployeeName,
     SalesAmount,
-    ROW_NUMBER() OVER (
+    DENSE_RANK() OVER (
       PARTITION BY Department
-      ORDER BY SalesAmount DESC, EmployeeID
-    ) AS RowNumber
+      ORDER BY SalesAmount DESC
+    ) AS DeptRank
   FROM EmployeeSales
 )
 SELECT
   Department,
+  DeptRank,
   EmployeeName,
   SalesAmount
-FROM ranked_sales
-WHERE RowNumber <= 3;
+FROM RankedDepartmentSales
+WHERE DeptRank <= 2
+ORDER BY Department, DeptRank;
 ```
+
+#### Top-2 employees per department result
+
+| `Department` | `DeptRank` | `EmployeeName` | `SalesAmount` |
+| :--- | :--- | :--- | :--- |
+| Engineering | 1 | Evan | 12000 |
+| Engineering | 2 | Fiona | 9000 |
+| Engineering | 2 | George | 9000 |
+| Sales | 1 | Alice | 10000 |
+| Sales | 2 | Bob | 8000 |
+| Sales | 2 | Charlie | 8000 |
+
+Notice that because Fiona and George tie for rank `2` in `Engineering`, and
+Bob and Charlie tie in `Sales`, `DENSE_RANK()` preserves both tied performers in
+the top tier.
+
+### The modern `QUALIFY` clause
+
+Several analytical database engines, including Google BigQuery, Snowflake, and
+`Databricks`, support the concise `QUALIFY` clause to filter window functions
+without nested queries:
+
+```sql
+SELECT
+  Department,
+  EmployeeName,
+  SalesAmount,
+  DENSE_RANK() OVER (
+    PARTITION BY Department
+    ORDER BY SalesAmount DESC
+  ) AS DeptRank
+FROM EmployeeSales
+QUALIFY DeptRank <= 2
+ORDER BY Department, DeptRank;
+```
+
+The database engine evaluates `QUALIFY` after window functions calculate,
+eliminating boilerplate nested queries.
 
 ## Common pitfalls
 
-### Filtering window functions directly
+### Unintended running totals from implicit `RANGE`
 
-This query is invalid in many SQL dialects because `ROW_NUMBER` isn't
-available to `WHERE` at the same query level:
-
-```sql
--- Invalid at this query level.
-SELECT
-  EmployeeName,
-  ROW_NUMBER() OVER (ORDER BY SalesAmount DESC) AS RowNumber
-FROM EmployeeSales
-WHERE RowNumber <= 3;
-```
-
-Use a nested query or common table expression as shown in the previous section.
-Some database engines provide a dialect-specific `QUALIFY` clause. Check the
-engine documentation before using it.
-
-### Unintended running totals
-
-Adding `ORDER BY` to an aggregate window function can change a total into a
-cumulative value:
+Adding `ORDER BY` to an aggregate window function converts a static group sum
+into a running sum. Omitting the explicit frame causes peer rows with identical
+timestamps to combine unpredictably.
 
 ```sql
+-- Risky: Implicit RANGE causes tied dates to produce combined sums
+SUM(SalesAmount) OVER (PARTITION BY Department ORDER BY HireDate)
+
+-- Predictable: Explicit ROWS advances strictly one record at a time
 SUM(SalesAmount) OVER (
   PARTITION BY Department
-  ORDER BY HireDate
+  ORDER BY HireDate, EmployeeID
+  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
 )
 ```
 
-If you need the same department total on every row, omit the window
-`ORDER BY`:
+### Non-deterministic pagination with `ROW_NUMBER`
+
+When sorting by a column with duplicate values, database engines don't ensure
+which row receives which row number between query runs.
 
 ```sql
-SUM(SalesAmount) OVER (
-  PARTITION BY Department
-)
+-- Non-deterministic: Bob and Charlie can swap row numbers on re-execution
+ROW_NUMBER() OVER (ORDER BY SalesAmount DESC)
+
+-- Deterministic: Unique tie-breaker guarantees identical sequence
+ROW_NUMBER() OVER (ORDER BY SalesAmount DESC, EmployeeID ASC)
 ```
 
-If you need a running total, specify the frame explicitly so the intended
-behavior is clear.
+### Missing null ordering definitions
 
-### Non-deterministic `ROW_NUMBER` results
+Different SQL engines position `NULL` values differently by default. PostgreSQL
+and Oracle treat `NULL` as larger than any value, placing it first in descending
+order, while MySQL and SQL Server treat `NULL` as smaller than any value,
+placing it last in descending order.
 
-If the `ORDER BY` values tie, the database can assign tied rows different
-`ROW_NUMBER` values on different executions. Add a unique tie-breaker, such as
-`EmployeeID`, to make the result stable:
+Declare null placement explicitly when you need consistency across platforms:
 
 ```sql
-ROW_NUMBER() OVER (
-  PARTITION BY Department
-  ORDER BY SalesAmount DESC, EmployeeID
-)
+ORDER BY SalesAmount DESC NULLS LAST
 ```
-
-`RANK` and `DENSE_RANK` are appropriate when tied values should retain the
-same position.
-
-### `NULL` values in partitions and ordering
-
-Rows with `NULL` in a `PARTITION BY` column belong to the same `NULL`
-partition. The database also determines where `NULL` values appear in an
-`ORDER BY` expression according to its engine and null-ordering rules.
-
-If the placement of `NULL` values matters, define it explicitly. For example:
-
-```sql
-ORDER BY
-  CASE WHEN SalesAmount IS NULL THEN 1 ELSE 0 END,
-  SalesAmount DESC
-```
-
-This expression places non-`NULL` sales amounts before `NULL` amounts. Use a
-clear business rule when deciding how missing values should rank.
 
 ## Key takeaways
 
-- Use `OVER` to calculate values across rows without collapsing the result.
-- Use `PARTITION BY` to calculate values independently for logical groups.
-- Use `ORDER BY` to define ranking order or calculate running values.
-- Use `ROW_NUMBER`, `RANK`, `DENSE_RANK`, and `NTILE` for different ranking
-  requirements.
-- Add tie-breakers when a deterministic row order matters.
-- Filter window-function results in an outer query or with a supported
-  `QUALIFY` clause.
-- Specify an explicit frame when running-total behavior must be predictable.
-- Define the partition and sort behavior for `NULL` values.
+- Use `OVER` to calculate values across related rows without collapsing the
+  underlying record detail.
+- Use `PARTITION BY` to restart window calculations independently for discrete
+  subsets.
+- Use `ORDER BY` to establish the sequence for ranking and cumulative
+  calculations.
+- Distinguish between `ROW_NUMBER` for unique sequential indexing, `RANK` for
+  competition ranking with gaps, and `DENSE_RANK` for consecutive tier ranking
+  without gaps.
+- Declare `ROWS BETWEEN` frames explicitly to prevent implicit `RANGE` peer
+  coalescing on duplicate values.
+- Filter window function results using outer queries, common table expressions,
+  or engine-native `QUALIFY` clauses.

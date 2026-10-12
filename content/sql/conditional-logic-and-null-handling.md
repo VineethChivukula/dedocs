@@ -2,305 +2,256 @@
 
 ## Overview
 
-SQL uses conditional expressions to choose values, classify rows, and handle
-missing information. Understanding SQL three-valued logic and `NULL` is
-essential because comparisons with `NULL` don't behave like comparisons with
-ordinary values.
+SQL uses conditional expressions to choose values, classify records, and handle missing information. Understanding SQL three-valued logic and `NULL` is essential because comparisons with `NULL` don't behave like comparisons between standard values.
 
-This guide explains three-valued logic, `CASE`, `COALESCE`, and `NULLIF`. It
-also describes common pitfalls that can change query results or cause runtime
-errors.
+This guide provides an end-to-end operational reference for three-valued logic, `CASE` expressions, `COALESCE`, `NULLIF`, null arithmetic propagation, and aggregate behavior across columns that accept nulls.
+
+## Example dataset
+
+The examples in this guide use the following `SalesRepresentatives` table, which includes null commissions and zero unit counts to illustrate edge cases:
+
+| `EmployeeID` | `Name` | `BaseSalary` | `Commission` | `UnitsSold` | `Revenue` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 101 | Alice | 80000.00 | 5000.00 | 100 | 25000.00 |
+| 102 | Bob | 60000.00 | `NULL` | 0 | 0.00 |
+| 103 | Charlie | 70000.00 | 3000.00 | 50 | 15000.00 |
+| 104 | Diana | 90000.00 | `NULL` | `NULL` | `NULL` |
 
 ## Three-valued logic
 
-Boolean logic normally has two possible values: `TRUE` and `FALSE`. SQL adds a
-third value, `UNKNOWN`, to represent the result of operations involving
-missing information. A `NULL` value represents the absence of a value. It
-doesn't represent zero, an empty string, or a specific unknown value.
+Standard Boolean logic operates on two values: `TRUE` and `FALSE`. SQL implements three-valued logic, introducing a third state: `UNKNOWN`.
 
-### Comparing values with `NULL`
-
-Standard comparison operators don't determine that a value is equal or
-unequal to `NULL`. Comparisons such as these evaluate to `UNKNOWN`:
+A `NULL` marker represents missing or inapplicable data. Because the database engine doesn't know the actual value behind `NULL`, standard equality or inequality comparisons yield `UNKNOWN`:
 
 ```sql
-Salary = NULL
-Salary <> NULL
-NULL = NULL
+-- All three expressions evaluate to UNKNOWN:
+Commission = 5000.00
+Commission <> 5000.00
+Commission = NULL
 ```
 
-Use `IS NULL` or `IS NOT NULL` to test for missing values:
+To test for missing values, use `IS NULL` or `IS NOT NULL`.
 
-```sql
-WHERE Commission IS NULL
-```
+### Truth table for three-valued logic
 
-```sql
-WHERE Commission IS NOT NULL
-```
+| Condition A | Condition B | `A AND B` | `A OR B` | `NOT A` |
+| :--- | :--- | :--- | :--- | :--- |
+| `TRUE` | `UNKNOWN` | `UNKNOWN` | `TRUE` | `FALSE` |
+| `FALSE` | `UNKNOWN` | `FALSE` | `UNKNOWN` | `TRUE` |
+| `UNKNOWN` | `UNKNOWN` | `UNKNOWN` | `UNKNOWN` | `UNKNOWN` |
 
-A `WHERE` clause keeps only rows for which its condition evaluates to `TRUE`.
-It excludes rows for which the condition evaluates to `FALSE` or `UNKNOWN`.
+### Row filtering in the `WHERE` clause
 
-### Logical operators
-
-When a query combines conditions with `AND`, `OR`, or `NOT`, `UNKNOWN` follows
-these rules:
-
-| Expression | Result | Reason |
-| --- | --- | --- |
-| `TRUE AND UNKNOWN` | `UNKNOWN` | The unknown condition might be true or false. |
-| `FALSE AND UNKNOWN` | `FALSE` | One false condition makes the result false. |
-| `TRUE OR UNKNOWN` | `TRUE` | One true condition makes the result true. |
-| `FALSE OR UNKNOWN` | `UNKNOWN` | The unknown condition might be true or false. |
-| `NOT UNKNOWN` | `UNKNOWN` | Inverting an unknown result remains unknown. |
-
-For example, this query excludes rows where `Commission` is `NULL` because
-the comparison produces `UNKNOWN`:
-
-```sql
-SELECT EmployeeID, Name
-FROM EmployeeSales
-WHERE Commission > 1000;
-```
-
-If you want missing commissions to behave as zero, state that rule explicitly:
-
-```sql
-SELECT EmployeeID, Name
-FROM EmployeeSales
-WHERE COALESCE(Commission, 0) > 1000;
-```
-
-## `CASE` expressions
-
-The `CASE` expression provides conditional branching in a query. You can use
-it in `SELECT`, `WHERE`, `ORDER BY`, and `GROUP BY` clauses.
-
-### Searched `CASE` syntax
-
-Use this form to evaluate one or more Boolean conditions:
-
-```sql
-CASE
-  WHEN condition1 THEN result1
-  WHEN condition2 THEN result2
-  ELSE default_result
-END
-```
-
-SQL evaluates the `WHEN` conditions in order and returns the result from the
-first condition that evaluates to `TRUE`. A condition that evaluates to
-`UNKNOWN` doesn't match.
-
-The `ELSE` clause is optional. If no `WHEN` condition evaluates to `TRUE` and
-the expression has no `ELSE` clause, `CASE` returns `NULL`.
-
-For example:
-
-```sql
-CASE
-  WHEN Salary >= 80000 THEN 'Tier 1'
-  WHEN Salary >= 50000 THEN 'Tier 2'
-  ELSE 'Tier 3'
-END
-```
-
-Put more specific conditions before broader conditions. In the example,
-employees with salaries of at least 80,000 must match the first condition
-before they can match the condition for salaries of at least 50,000.
-
-## `COALESCE`
-
-`COALESCE` returns the first non-`NULL` expression in its argument list:
-
-```sql
-COALESCE(expression1, expression2, expression3)
-```
-
-SQL evaluates the expressions from left to right. If every expression is
-`NULL`, `COALESCE` returns `NULL`.
-
-Use `COALESCE` when you need a fallback value:
-
-```sql
-SELECT
-  Name,
-  COALESCE(Commission, 0) AS Commission
-FROM EmployeeSales;
-```
-
-You can also use it in calculations:
-
-```sql
-SELECT
-  BaseSalary + COALESCE(Commission, 0) AS TotalEarnings
-FROM EmployeeSales;
-```
-
-Choose a fallback value that matches the meaning of the data. Converting a
-missing commission to zero is appropriate only when a missing commission
-means that no commission applies.
-
-## `NULLIF`
-
-`NULLIF(expression1, expression2)` compares two expressions:
-
-- If the expressions are equal, `NULLIF` returns `NULL`.
-- If they aren't equal, `NULLIF` returns `expression1`.
-
-For example:
-
-```sql
-NULLIF(UnitsSold, 0)
-```
-
-returns `NULL` when `UnitsSold` is zero. This makes it useful for protecting a
-division from a zero denominator:
-
-```sql
-SELECT
-  Revenue / NULLIF(UnitsSold, 0) AS RevenuePerUnit
-FROM Sales;
-```
-
-When `UnitsSold` is zero, the expression returns `NULL` instead of attempting
-to divide by zero. Decide separately whether the app should display
-that `NULL` as a message or fallback value.
-
-## Complete example
-
-Suppose that an `EmployeeSales` table contains `EmployeeID`, `Name`,
-`BaseSalary`, `Commission`, `ActualSales`, and `TargetSales`. The following
-query calculates earnings, assigns compensation tiers, calculates target
-achievement, and assigns a sales status:
+A SQL `WHERE` clause accepts rows only when the filter predicate evaluates strictly to `TRUE`. The engine discards rows that evaluate to `FALSE` or `UNKNOWN`.
 
 ```sql
 SELECT
   EmployeeID,
   Name,
-  BaseSalary + COALESCE(Commission, 0) AS TotalEarnings,
-  CASE
-    WHEN BaseSalary + COALESCE(Commission, 0) >= 80000 THEN 'Tier 1'
-    WHEN BaseSalary + COALESCE(Commission, 0) >= 50000 THEN 'Tier 2'
-    ELSE 'Tier 3'
-  END AS CompensationTier,
-  ROUND(
-    (ActualSales / NULLIF(TargetSales, 0)) * 100,
-    2
-  ) AS TargetAchievementPct,
-  CASE
-    WHEN TargetSales IS NULL OR TargetSales = 0 THEN 'No Target Set'
-    WHEN ActualSales >= TargetSales THEN 'Goal Achieved'
-    ELSE 'Goal Missed'
-  END AS SalesStatus
-FROM EmployeeSales
-WHERE COALESCE(Commission, 0) < 5000;
+  Commission
+FROM SalesRepresentatives
+WHERE Commission > 4000.00;
 ```
 
-This query uses each feature for a different purpose:
+#### Step-by-step predicate evaluation
 
-- `COALESCE` treats a missing commission as zero for the earnings calculation
-  and filter.
-- `CASE` assigns a compensation tier and a sales status.
-- `NULLIF` converts a zero target to `NULL` before division.
-- `IS NULL` explicitly checks for employees without a target.
+- Alice: `5000.00 > 4000.00` evaluates to `TRUE`. Retained.
+- Bob: `NULL > 4000.00` evaluates to `UNKNOWN`. Discarded.
+- Charlie: `3000.00 > 4000.00` evaluates to `FALSE`. Discarded.
+- Diana: `NULL > 4000.00` evaluates to `UNKNOWN`. Discarded.
 
-The exact return type of division and `ROUND` behavior can vary by database
-engine. Check your engine's documentation when numeric precision matters.
+#### Output table
+
+| `EmployeeID` | `Name` | `Commission` |
+| :--- | :--- | :--- |
+| 101 | Alice | 5000.00 |
+
+## Null arithmetic and `COALESCE`
+
+In SQL, arithmetic expressions containing `NULL` propagate to `NULL`. Adding, subtracting, or multiplying by `NULL` returns `NULL`:
+
+```sql
+-- Without null handling, Bob's total earnings become NULL:
+SELECT
+  Name,
+  BaseSalary + Commission AS UnsafeTotalEarnings
+FROM SalesRepresentatives;
+```
+
+### Output table without null handling
+
+| `Name` | `UnsafeTotalEarnings` |
+| :--- | :--- |
+| Alice | 85000.00 |
+| Bob | `NULL` |
+| Charlie | 73000.00 |
+| Diana | `NULL` |
+
+Even though Bob earned a base salary of `60000.00`, missing commission information wipes out his calculated earnings.
+
+### Fallback substitution with `COALESCE`
+
+The `COALESCE` function accepts a list of arguments and returns the first non-`NULL` value:
+
+```sql
+SELECT
+  Name,
+  BaseSalary,
+  COALESCE(Commission, 0.00) AS CleanCommission,
+  BaseSalary + COALESCE(Commission, 0.00) AS SafeTotalEarnings
+FROM SalesRepresentatives;
+```
+
+### Output table with `COALESCE`
+
+| `Name` | `BaseSalary` | `CleanCommission` | `SafeTotalEarnings` |
+| :--- | :--- | :--- | :--- |
+| Alice | 80000.00 | 5000.00 | 85000.00 |
+| Bob | 60000.00 | 0.00 | 60000.00 |
+| Charlie | 70000.00 | 3000.00 | 73000.00 |
+| Diana | 90000.00 | 0.00 | 90000.00 |
+
+`COALESCE` substitutes `0.00` for missing commission rows, allowing arithmetic summation to succeed across every record.
+
+## Aggregate function mechanics with nulls
+
+A frequent interview trap and production error involves how SQL aggregate functions handle `NULL` markers.
+
+- `COUNT(*)` counts every row in the partition, regardless of whether column values are null.
+- `COUNT(column)` counts only rows where the specified column is non-`NULL`.
+- `AVG(column)` computes the arithmetic mean across non-`NULL` rows only. It ignores null rows from both the numerator and the denominator.
+
+```sql
+SELECT
+  COUNT(*) AS TotalRowCount,
+  COUNT(Commission) AS NonNullCommissionCount,
+  SUM(Commission) AS SumCommission,
+  AVG(Commission) AS AvgIgnoringNulls,
+  AVG(COALESCE(Commission, 0.00)) AS AvgIncludingNullsAsZero
+FROM SalesRepresentatives;
+```
+
+### Aggregate comparison output
+
+| `TotalRowCount` | `NonNullCommissionCount` | `SumCommission` | `AvgIgnoringNulls` | `AvgIncludingNullsAsZero` |
+| :--- | :--- | :--- | :--- | :--- |
+| 4 | 2 | 8000.00 | **4000.00** | **2000.00** |
+
+### Why the averages diverge
+
+- For `AVG(Commission)`, the engine sums the Alice commission of `5000.00` and the Charlie commission of `3000.00` to get `8000.00`, then divides by `2`, representing the count of non-null commission rows, producing `4000.00`.
+- For `AVG(COALESCE(Commission, 0.00))`, the engine treats Bob and Diana as earning `0.00`, dividing `8000.00` by all `4` representatives to produce `2000.00`.
+
+Decide whether business metrics require averaging across active participants or the entire population before selecting aggregate expressions.
+
+## Safe division with `NULLIF`
+
+The `NULLIF` function compares two expressions:
+
+```sql
+NULLIF(expression1, expression2)
+```
+
+- If both expressions are equal, `NULLIF` returns `NULL`.
+- If the expressions differ, `NULLIF` returns `expression1`.
+
+`NULLIF` is commonly used to defend calculations against zero-division exceptions. In standard SQL, dividing any numeric value by `NULL` returns `NULL`, whereas dividing by zero aborts the query with a runtime division-by-zero error.
+
+```sql
+SELECT
+  Name,
+  Revenue,
+  UnitsSold,
+  ROUND(Revenue / NULLIF(UnitsSold, 0), 2) AS RevenuePerUnit
+FROM SalesRepresentatives;
+```
+
+### Safe division output table
+
+| `Name` | `Revenue` | `UnitsSold` | `RevenuePerUnit` | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| Alice | 25000.00 | 100 | 250.00 | Standard calculation |
+| Bob | 0.00 | 0 | `NULL` | `NULLIF(0, 0)` returns `NULL`, avoiding error |
+| Charlie | 15000.00 | 50 | 300.00 | Standard calculation |
+| Diana | `NULL` | `NULL` | `NULL` | `Revenue` is null |
+
+## Conditional branching with `CASE` expressions
+
+The `CASE` expression provides branching logic directly within SQL queries. SQL supports two syntactic variations: searched `CASE` and simple `CASE`.
+
+### Searched `CASE` expressions
+
+A searched `CASE` expression evaluates a series of independent Boolean expressions:
+
+```sql
+SELECT
+  Name,
+  BaseSalary + COALESCE(Commission, 0.00) AS TotalEarnings,
+  CASE
+    WHEN BaseSalary + COALESCE(Commission, 0.00) >= 85000.00 THEN 'Tier 1 Executive'
+    WHEN BaseSalary + COALESCE(Commission, 0.00) >= 70000.00 THEN 'Tier 2 Senior'
+    ELSE 'Tier 3 Associate'
+  END AS CompensationTier
+FROM SalesRepresentatives
+ORDER BY TotalEarnings DESC;
+```
+
+#### Searched `CASE` result
+
+| `Name` | `TotalEarnings` | `CompensationTier` |
+| :--- | :--- | :--- |
+| Diana | 90000.00 | Tier 1 Executive |
+| Alice | 85000.00 | Tier 1 Executive |
+| Charlie | 73000.00 | Tier 2 Senior |
+| Bob | 60000.00 | Tier 3 Associate |
+
+The engine evaluates `WHEN` branches sequentially from top to bottom. When a condition evaluates to `TRUE`, the engine returns the result and stops evaluating subsequent branches. Place specific criteria before general criteria.
+
+### Simple `CASE` expressions
+
+A simple `CASE` expression compares a single input expression against a list of static values:
+
+```sql
+SELECT
+  Name,
+  UnitsSold,
+  CASE UnitsSold
+    WHEN 100 THEN 'Target Hit'
+    WHEN 50 THEN 'Half Target'
+    WHEN 0 THEN 'No Sales'
+    ELSE 'Other'
+  END AS SalesProgress
+FROM SalesRepresentatives;
+```
+
+Simple `CASE` expressions test for strict value equality. Because `NULL = NULL` evaluates to `UNKNOWN`, a simple `CASE` can't match `WHEN NULL`. Use searched `CASE` with `WHEN column IS NULL` to inspect null values.
 
 ## Common pitfalls
 
-### `NULL` values with `NOT IN`
+### String concatenation with nulls
 
-`NOT IN` can produce no rows when its list or nested query contains `NULL`:
-
-```sql
-WHERE DepartmentID NOT IN (10, 20, NULL)
-```
-
-For a department such as 30, the comparison with 10 and 20 is `FALSE`, but
-the comparison with `NULL` is `UNKNOWN`. `FALSE OR UNKNOWN` is `UNKNOWN`, and
-`NOT UNKNOWN` is still `UNKNOWN`. The `WHERE` clause excludes that row.
-
-Use `NOT EXISTS`, or filter `NULL` values out of the nested query:
+In standard SQL specifications, concatenating a string with `NULL` using the `||` operator returns `NULL`:
 
 ```sql
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM ExcludedDepartments AS excluded
-  WHERE excluded.DepartmentID = Employees.DepartmentID
-)
+-- Returns NULL when middle name is missing:
+first_name || ' ' || middle_name || ' ' || last_name
+
+-- Reliable solution:
+first_name || COALESCE(' ' || middle_name, '') || ' ' || last_name
 ```
 
-```sql
-WHERE DepartmentID NOT IN (
-  SELECT DepartmentID
-  FROM ExcludedDepartments
-  WHERE DepartmentID IS NOT NULL
-)
-```
+Database engines such as Google BigQuery provide the helper function `CONCAT()`, which automatically treats null arguments as empty strings.
 
-### Incompatible data types
+### Unhandled `ELSE` branches in `CASE`
 
-The expressions in `COALESCE` should have compatible data types. The result
-expressions in a `CASE` expression should also have compatible types.
-
-For example, this expression can cause a type-conversion error in a strict
-SQL engine:
-
-```sql
-COALESCE(Commission, 'N/A')
-```
-
-If you need a text fallback, convert the numeric value to text explicitly.
-The cast syntax depends on the database engine:
-
-```sql
-COALESCE(CAST(Commission AS VARCHAR(20)), 'N/A')
-```
-
-Use a numeric fallback such as `0` when the result is part of a numeric
-calculation.
-
-### `NULL` values in aggregate functions
-
-Aggregate functions such as `SUM`, `AVG`, and `COUNT(column)` generally ignore
-`NULL` values. As a result, `AVG(Commission)` calculates the average only for
-employees with a non-`NULL` commission.
-
-If a missing commission should count as zero, use:
-
-```sql
-AVG(COALESCE(Commission, 0))
-```
-
-This changes both the sum and the number of values included in the average.
-Use it only when that interpretation matches the data model.
-
-### Assuming that `CASE` always prevents an error
-
-Don't rely on a `CASE` expression alone to protect every unsafe expression
-from evaluation. Query optimizers can transform expressions, and evaluation
-details vary by database engine.
-
-For division, use `NULLIF` directly in the denominator:
-
-```sql
-100 / NULLIF(x, 0)
-```
-
-You can still use `CASE` to choose how to display or classify the resulting
-`NULL` value.
+If no `WHEN` condition evaluates to `TRUE` and the expression omits an `ELSE` clause, SQL returns `NULL` by default. Always include an explicit `ELSE` clause to prevent accidental null injection into analytics tables.
 
 ## Key takeaways
 
-- SQL uses `TRUE`, `FALSE`, and `UNKNOWN`. Comparisons with `NULL` usually
-  produce `UNKNOWN`.
-- Use `IS NULL` and `IS NOT NULL` to test for missing values.
-- Use `CASE` for conditional values and classifications.
-- Use `COALESCE` to select the first non-`NULL` value.
-- Use `NULLIF` to convert a specific value, such as zero, to `NULL`.
-- Check data types when combining `COALESCE` arguments or `CASE` results.
-- Decide explicitly whether a missing value should remain missing or represent
-  a default such as zero.
+- SQL evaluates conditions using three-valued logic: `TRUE`, `FALSE`, and `UNKNOWN`.
+- A `WHERE` clause filters out records evaluating to `UNKNOWN`.
+- Use `IS NULL` and `IS NOT NULL` to test for missing values. Never use `= NULL`.
+- `COALESCE` returns the first non-null value from an argument list, protecting arithmetic from null propagation.
+- `COUNT(*)` counts every row, while `COUNT(column)` and `AVG(column)` disregard null values.
+- `NULLIF(val, 0)` protects division expressions from division-by-zero exceptions by substituting `NULL` into the denominator.
+- Searched `CASE` statements evaluate sequentially. Put strict conditions ahead of loose conditions.
