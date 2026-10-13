@@ -513,4 +513,3 @@ flowchart LR
 - Modern cloud data lakehouses combine both approaches: normalized or raw
   silver staging layers feed Kimball-style dimensional star schemas in the gold
   serving layer.
-
