@@ -56,7 +56,7 @@ flowchart LR
     D --> E["Compute Window Function<br/>Output value per row"]
 ```
 
-### Global windows without partitions
+### Global window aggregates without partitions
 
 When the `OVER` clause contains no `PARTITION BY` clause, the window
 encompasses the entire result set returned by the query:

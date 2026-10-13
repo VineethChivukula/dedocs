@@ -121,10 +121,10 @@ export default defineConfig({
                 text: "Database normalization mechanics",
                 link: "/modeling/database-normalization-mechanics",
               },
-      //         {
-      //           text: "Dimensional Modeling (Kimball vs Inmon)",
-      //           link: "/modeling/dimensional-modeling",
-      //         },
+              {
+                text: "Dimensional modeling methodology",
+                link: "/modeling/dimensional-modeling-methodology",
+              },
       //       ],
       //     },
       //     {

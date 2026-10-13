@@ -4,7 +4,8 @@
 docs/
 
 # Vale styles
-styles/
+styles/*
+!styles/config/
 
 # Dependencies
 node_modules/
