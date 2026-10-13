@@ -29,8 +29,6 @@ flowchart LR
 Each architecture offers distinct trade-offs between join complexity, storage
 compression efficiency, update mechanics, and enterprise governance.
 
----
-
 ## Star schema
 
 The star schema is the foundational design pattern of Ralph Kimball's
@@ -77,8 +75,6 @@ flowchart TD
   warehouse storage, while fact tables account for more than 90%. Consequently,
   denormalizing dimension tables introduces a negligible storage cost while
   eliminating join overhead.
-
----
 
 ## Snowflake schema
 
@@ -137,24 +133,19 @@ frequency. Examples include:
 * Attaching dynamic foreign exchange currency conversion rates to an
   international billing dimension.
 
----
-
 ## Wide denormalized tables
 
 Wide denormalized tables, known as One Big Table or OBT, combine business
 measurements with all descriptive attributes into a single flat structure.
 
-```text
-+----------------------------------------------------------------------------------------------------+
-|                                           WIDE_SALES_OBT                                           |
-+----------+------------+---------------+----------+-------+-------+----------+----------+-----------+
-| order_id | order_date | customer_name | city     | sku   | brand | category | quantity | sale_amt  |
-+----------+------------+---------------+----------+-------+-------+----------+----------+-----------+
-| 1001     | 2026-01-15 | Alice Smith   | New York | P-100 | Apex  | Audio    | 2        | 120.00    |
-| 1002     | 2026-01-15 | Bob Jones     | Chicago  | P-200 | Nova  | Display  | 1        | 350.00    |
-| 1003     | 2026-01-16 | Charlie Brown | Dallas   | P-100 | Apex  | Audio    | 1        | 60.00     |
-+----------+------------+---------------+----------+-------+-------+----------+----------+-----------+
-```
+The following table illustrates a pre-joined `sales_obt` relation storing
+facts alongside dimensional attributes:
+
+| `order_id` | `order_date` | `customer_name` | `city` | `sku` | `brand` | `category` | `quantity` | `sale_amt` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1001 | 2026-01-15 | Alice Smith | New York | P-100 | Apex | Audio | 2 | 120.00 |
+| 1002 | 2026-01-15 | Bob Jones | Chicago | P-200 | Nova | Display | 1 | 350.00 |
+| 1003 | 2026-01-16 | Charlie Brown | Dallas | P-100 | Apex | Audio | 1 | 60.00 |
 
 OBT has gained widespread adoption alongside modern cloud columnar data
 platforms including BigQuery, ClickHouse, Databricks, and Snowflake.
@@ -184,8 +175,6 @@ platforms including BigQuery, ClickHouse, Databricks, and Snowflake.
   high efficiency using run-length encoding and dictionary encoding. Sparse
   columns containing null values require almost no physical disk space.
 
----
-
 ## Architectural comparison matrix
 
 The following table summarizes the structural, operational, and performance
@@ -201,8 +190,6 @@ characteristics of the three schema architectures:
 | **SCD and update handling** | Clean support for Type 1, Type 2, and Type 3 SCDs | Clean because updates occur in isolated lookup tables | Complex because mutating dimension values requires rewriting fact rows |
 | **Enterprise governance** | High with reusable conformed dimensions across a bus matrix | High with centralized relational integrity | Moderate to low because isolated tables risk metric drift |
 | **Primary target workload** | Enterprise data warehouses and BI self-service | Secondary outrigger tables and specialized master data | High-concurrency dashboards, customer APIs, and ML feature tables |
-
----
 
 ## Practical case study: E-commerce analytics
 
@@ -284,8 +271,6 @@ ORDER BY total_revenue DESC;
 | :--- | :--- |
 | Audio | 450.00 |
 | Display | 450.00 |
-
----
 
 ### 2. Snowflake schema implementation
 
@@ -372,8 +357,6 @@ ORDER BY total_revenue DESC;
 | Audio | 450.00 |
 | Display | 450.00 |
 
----
-
 ### 3. Wide denormalized table implementation
 
 The wide table pattern flattens all product and customer attributes into a
@@ -431,8 +414,6 @@ ORDER BY total_revenue DESC;
 All three queries produce identical business results. However, the query
 optimizer pathways, execution overhead, and storage profiles differ
 substantially.
-
----
 
 ## Key caveats and operational failure modes
 
@@ -508,8 +489,6 @@ engines such as PostgreSQL or MySQL creates severe performance bottlenecks:
 
 Data teams must restrict wide denormalized tables to column-oriented
 architectures.
-
----
 
 ## Modern lakehouse and medallion convergence
 
