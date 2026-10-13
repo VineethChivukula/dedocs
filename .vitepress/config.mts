@@ -125,6 +125,10 @@ export default defineConfig({
                 text: "Dimensional modeling methodology",
                 link: "/modeling/dimensional-modeling-methodology",
               },
+              {
+                text: "Schema architectures",
+                link: "/modeling/schema-architectures",
+              },
       //       ],
       //     },
       //     {
