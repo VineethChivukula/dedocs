@@ -129,6 +129,10 @@ export default defineConfig({
                 text: "Schema architectures",
                 link: "/modeling/schema-architectures",
               },
+              {
+                text: "Fact table design and types",
+                link: "/modeling/fact-table-design-and-types",
+              },
       //       ],
       //     },
       //     {

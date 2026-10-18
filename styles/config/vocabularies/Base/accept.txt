@@ -40,3 +40,6 @@ lookups
 APIs
 MPP
 SKU
+clickstream
+pageviews
+ATM
