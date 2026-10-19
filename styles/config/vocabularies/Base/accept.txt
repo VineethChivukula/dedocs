@@ -30,8 +30,10 @@ ClickHouse
 Presto
 Trino
 ORC
-outrigger
-outriggers
+(?i)outrigger(s)?
+(?i)denormaliz(e|es|ed|ing|ation)
+unmanaged
+(?i)boolean
 micro-partitions
 ShuffleHashJoin
 snowflaking

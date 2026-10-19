@@ -105,55 +105,59 @@ export default defineConfig({
         },
       ],
 
-        "/modeling/": [
-          {
-            text: "Modeling",
-            items: [
-              {
-                text: "Data modeling fundamentals",
-                link: "/modeling/data-modeling-fundamentals",
-              },
-              {
-                text: "Entities, attributes, and relationships",
-                link: "/modeling/entities-attributes-and-relationships",
-              },
-              {
-                text: "Database normalization",
-                link: "/modeling/database-normalization",
-              },
-              {
-                text: "Dimensional modeling methodology",
-                link: "/modeling/dimensional-modeling-methodology",
-              },
-              {
-                text: "Schema architectures",
-                link: "/modeling/schema-architectures",
-              },
-              {
-                text: "Fact table design and types",
-                link: "/modeling/fact-table-design-and-types",
-              },
-              {
-                text: "Specialized fact designs",
-                link: "/modeling/specialized-fact-designs",
-              },
-      //       ],
-      //     },
-      //     {
-      //       text: "Warehouse & Lakehouse",
-      //       items: [
-      //         {
-      //           text: "Fact & Dimension Patterns",
-      //           link: "/modeling/facts-and-dimensions",
-      //         },
-      //         {
-      //           text: "Slowly Changing Dimensions (SCD)",
-      //           link: "/modeling/scd-patterns",
-      //         },
-      //         { text: "Lakehouse Architectures", link: "/modeling/lakehouse" },
-            ],
-          },
-        ],
+      "/modeling/": [
+        {
+          text: "Modeling",
+          items: [
+            {
+              text: "Data modeling fundamentals",
+              link: "/modeling/data-modeling-fundamentals",
+            },
+            {
+              text: "Entities, attributes, and relationships",
+              link: "/modeling/entities-attributes-and-relationships",
+            },
+            {
+              text: "Database normalization",
+              link: "/modeling/database-normalization",
+            },
+            {
+              text: "Dimensional modeling methodology",
+              link: "/modeling/dimensional-modeling-methodology",
+            },
+            {
+              text: "Schema architectures",
+              link: "/modeling/schema-architectures",
+            },
+            {
+              text: "Fact table design and types",
+              link: "/modeling/fact-table-design-and-types",
+            },
+            {
+              text: "Specialized fact designs",
+              link: "/modeling/specialized-fact-designs",
+            },
+            {
+              text: "Dimensional design patterns",
+              link: "/modeling/dimensional-design-patterns",
+            },
+            //       ],
+            //     },
+            //     {
+            //       text: "Warehouse & Lakehouse",
+            //       items: [
+            //         {
+            //           text: "Fact & Dimension Patterns",
+            //           link: "/modeling/facts-and-dimensions",
+            //         },
+            //         {
+            //           text: "Slowly Changing Dimensions (SCD)",
+            //           link: "/modeling/scd-patterns",
+            //         },
+            //         { text: "Lakehouse Architectures", link: "/modeling/lakehouse" },
+          ],
+        },
+      ],
 
       //   "/spark/": [
       //     {
