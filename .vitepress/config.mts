@@ -141,6 +141,10 @@ export default defineConfig({
               text: "Dimensional design patterns",
               link: "/modeling/dimensional-design-patterns",
             },
+            {
+              text: "Primary and key management",
+              link: "/modeling/primary-and-key-management",
+            },
             //       ],
             //     },
             //     {

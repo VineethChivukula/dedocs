@@ -12,8 +12,12 @@ denormalized
 denormalization
 Margy
 ETL
+ELT
 OLTP
 OLAP
+CRM
+ERP
+(?i)sha(-256)?
 3NF
 EDW
 POS
@@ -52,3 +56,4 @@ overcounting
 (?i)subquer(y|ies)
 unary
 hoc
+(?i)uuid(s)?
