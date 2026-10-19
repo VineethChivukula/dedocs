@@ -18,15 +18,23 @@ monetary amounts, durations, and account balances.
 title: Fact table architectures overview
 ---
 flowchart TD
-    Patterns["Fact Table Architectural Patterns"]
+    Root["Fact Table Architectural Patterns"]
 
-    T["Transaction Fact Table<br/>• Discrete point-in-time events<br/>• Append-only atomic grain<br/>• Single event date key"]
-    P["Periodic Snapshot Fact Table<br/>• Predictable interval balances<br/>• Dense periodic status layers<br/>• Period-ending date key"]
-    A["Accumulating Snapshot Fact Table<br/>• Multi-stage pipeline velocity<br/>• In-place milestone updates<br/>• Multiple role-playing date keys"]
+    Root --> T["Transaction Fact Table"]
+    Root --> P["Periodic Snapshot Table"]
+    Root --> A["Accumulating Snapshot Table"]
 
-    Patterns --> T
-    Patterns --> P
-    Patterns --> A
+    T --> T1["Point-in-time discrete events"]
+    T --> T2["Append-only atomic grain"]
+    T --> T3["Single event date key"]
+
+    P --> P1["Regular interval status balances"]
+    P --> P2["Dense periodic snapshot layers"]
+    P --> P3["Single period-ending date key"]
+
+    A --> A1["Multi-stage process lifecycles"]
+    A --> A2["In-place milestone updates"]
+    A --> A3["Multiple role-playing date keys"]
 ```
 
 Selecting an appropriate fact table pattern determines how data pipelines
@@ -305,12 +313,9 @@ CREATE TABLE fact_order_fulfillment_accumulating (
 );
 ```
 
-## Key caveats and operational failure modes
+## Common pitfalls
 
-Architectural flaws in fact table implementations degrade query performance,
-corrupt analytical calculations, and increase database storage overhead.
-
-### 1. The null foreign key anti-pattern
+### The null foreign key anti-pattern
 
 Data pipelines sometimes populate SQL `NULL` values in fact table foreign key
 columns when an attribute is unknown or not yet applicable, such as setting
@@ -325,7 +330,7 @@ To maintain referential integrity and avoid query errors, data warehouses
 must use non-null integer surrogate keys that reference designated placeholder
 dimension rows, including `-1` for `Not Applicable` or `-2` for `To Be Determined`.
 
-### 2. Centipede fact tables with excessive dimensions
+### Centipede fact tables with excessive dimensions
 
 A centipede fact table occurs when schema designers split correlated or
 hierarchical attributes into dozens of small lookup dimensions, resulting in
@@ -336,7 +341,7 @@ and make query generation excessively complex for business intelligence tools.
 Designers should collapse correlated dimensional attributes into wider,
 denormalized dimensions.
 
-### 3. Fact normalization and row multiplication
+### Fact normalization and row multiplication
 
 Fact normalization occurs when engineers attempt to normalize a fact table
 by replacing distinct numeric columns with a generic `fact_type_key` and a
@@ -347,7 +352,7 @@ measured metrics. Calculating basic intra-row formulas, such as
 `net_amount = gross_amount - discount_amount`, requires self-joins or complex
 conditional aggregations, severely degrading query performance.
 
-### 4. Storing calculated ratios or to-date metrics
+### Storing calculated ratios or to-date metrics
 
 Storing calculated percentages, such as `profit_margin_pct`, or cumulative
 totals, such as `year_to_date_sales`, directly in fact table rows violates
@@ -358,7 +363,7 @@ percentages across multiple products produces mathematically nonsensical
 totals. Engineers must always compute ratios and year-to-date metrics
 dynamically in SQL queries by aggregating the underlying additive base measures.
 
-### 5. Storage fragmentation in accumulating snapshots
+### Storage fragmentation in accumulating snapshots
 
 Because accumulating snapshot fact tables update existing rows as milestones
 occur, high-volume updates in traditional row-oriented relational engines cause
@@ -367,3 +372,13 @@ page splits, disk block fragmentation, and severe write amplification.
 To mitigate update penalties, database teams should partition accumulating
 snapshot tables by their initial milestone date using `order_date_key` and schedule
 periodic database table maintenance and re-indexing.
+
+## Key takeaways
+
+- Declare the grain at the lowest possible atomic level to maximize query flexibility and preserve true dimensionality.
+- Classify numeric metrics into additive measures summable across all dimensions, semi-additive measures non-summable across time, and non-additive measures requiring dynamic quotient calculation.
+- Choose transaction fact tables for append-only, sparse, instantaneous event tracking driven by a single transaction date key.
+- Choose periodic snapshot fact tables for dense, regular interval status and inventory balance monitoring with period-ending date keys.
+- Choose accumulating snapshot fact tables for defined lifecycle pipelines with role-playing date keys and milestone velocity lag metrics.
+- Avoid SQL `NULL` foreign keys by using designated placeholder surrogate keys such as `-1` for Not Applicable or `-2` for pending values to prevent silent row drops during inner joins.
+- Collapse correlated attributes into wide dimension tables rather than building centipede fact tables with dozens of small lookup dimensions.

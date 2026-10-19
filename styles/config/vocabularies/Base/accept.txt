@@ -43,3 +43,7 @@ SKU
 clickstream
 pageviews
 ATM
+(?i)factless
+overcount
+overcounts
+overcounting

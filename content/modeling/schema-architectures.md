@@ -17,13 +17,8 @@ spectrum:
 
 ```mermaid
 flowchart LR
-    subgraph Spectrum["Normalization vs Denormalization Spectrum"]
-        direction LR
-        A["Snowflake Schema<br/>• 3NF Dimensions<br/>• Multi-Level Joins<br/>• Minimal Raw Redundancy"]
-        B["Star Schema<br/>• Flat Dimensions<br/>• Single-Level Joins<br/>• Optimal BI Performance"]
-        C["Wide Table (OBT)<br/>• Zero Joins<br/>• Maximum Columnar Scan Speed<br/>• High Write Amplification"]
-        A --> B --> C
-    end
+    A["Snowflake Schema<br/>(Normalized 3NF)"] -->|De-normalize dimensions| B["Star Schema<br/>(Dimensional Model)"]
+    B -->|Pre-join facts and dims| C["Wide Table / OBT<br/>(Fully Flattened)"]
 ```
 
 Each architecture offers distinct trade-offs between join complexity, storage
@@ -415,12 +410,9 @@ All three queries produce identical business results. However, the query
 optimizer pathways, execution overhead, and storage profiles differ
 substantially.
 
-## Key caveats and operational failure modes
+## Common pitfalls
 
-Architectural selections carry direct operational risks when misapplied to
-unsuitable workloads or storage engines.
-
-### 1. The disk space illusion of snowflaking
+### The disk space illusion of snowflaking
 
 Engineers accustomed to online transaction processing (OLTP) normalization
 frequently normalize dimensional structures to eliminate attribute repetition.
@@ -431,7 +423,7 @@ In return, normalizing degrades dimension navigation, forces complex SQL
 queries with multiple joins, and prevents the query engine from applying
 star-join bitmap filters across low-cardinality attributes.
 
-### 2. Network shuffle overhead in distributed clusters
+### Network shuffle overhead in distributed clusters
 
 In distributed query engines including Apache Spark, Trino, and Presto, joining
 fact tables to normalized dimension tables requires moving data across worker
@@ -447,7 +439,7 @@ nodes:
 Cascading snowflake joins multiply the probability of network shuffle
 bottlenecks, significantly increasing query execution latency.
 
-### 3. Slowly Changing Dimension and update bottlenecks in wide tables
+### Slowly changing dimension update bottlenecks in wide tables
 
 Updating dimension attributes or tracking historical versions through SCD
 Type 2 creates severe write amplification in wide tables:
@@ -462,7 +454,7 @@ Type 2 creates severe write amplification in wide tables:
 Wide tables should represent finalized, immutable measurement events, or be
 rebuilt as downstream materialized projections.
 
-### 4. Loss of conformed dimensions and metric drift
+### Loss of conformed dimensions and metric drift
 
 When independent business units construct isolated wide tables without a
 shared enterprise data bus, dimensional consistency degrades:
@@ -474,7 +466,7 @@ Without Kimball's conformed dimensions, different departments generate
 conflicting business metrics from separate wide tables, undermining data trust
 across the organization.
 
-### 5. Row-store versus column-store mismatch
+### Storage engine mismatch between row and column stores
 
 Deploying wide denormalized tables on traditional row-oriented relational
 engines such as PostgreSQL or MySQL creates severe performance bottlenecks:
@@ -497,7 +489,7 @@ layered medallion framework, combining the strengths of each pattern:
 
 ```mermaid
 flowchart TD
-    Raw["Raw Operational Sources<br/>(APIs, Webhooks, CDC, Logs)"] --> Bronze
+    Raw["Raw Operational Sources<br/>(APIs, Webhooks, CDC)"] --> Bronze
     
     subgraph Bronze["Bronze Layer (Raw Ingestion)"]
         B1["Raw append-only event streams<br/>(Parquet / Iceberg / Delta Lake)"]
@@ -506,15 +498,19 @@ flowchart TD
     Bronze --> Silver
     
     subgraph Silver["Silver Layer (Curated Foundation)"]
-        S1["Conformed Star Schema<br/>• Standardized SCD Type 2 Dimensions<br/>• Atomic Fact Tables<br/>• Clean Entity Relationships"]
+        S1["Conformed Star Schema"]
+        S2["SCD Type 2 Dimensions"]
+        S3["Atomic Fact Tables"]
+        S1 --- S2
+        S2 --- S3
     end
     
     Silver --> Gold
     
-    subgraph Gold["Gold Layer (Presentation & Consumption)"]
-        G1["Star Schemas<br/>(Ad-hoc SQL Exploration & BI)"]
-        G2["Wide Denormalized Tables (OBT)<br/>(High-Concurrency Dashboards & ML Features)"]
-        G3["Aggregated Data Marts<br/>(Executive Reporting)"]
+    subgraph Gold["Gold Layer (Presentation)"]
+        G1["Star Schemas (Ad-Hoc BI)"]
+        G2["Wide Tables / OBT (Fast Scan)"]
+        G3["Data Marts (Executive Metrics)"]
     end
 ```
 
@@ -532,3 +528,13 @@ flowchart TD
    * **Wide denormalized tables**: generated as transformed models through dbt
      or materialized views to power high-speed customer-facing dashboards,
      sub-second API endpoints, and machine learning feature stores.
+
+## Key takeaways
+
+* Star schemas balance query speed and simplicity by pairing atomic fact tables with denormalized dimensions for single-level joins and star-join optimizations.
+* Snowflake schemas eliminate redundant dimension strings at the cost of cascading joins, complex query planning, and deactivated bitmap index pruning.
+* Restrict snowflake normalization to dimension outriggers where secondary attributes represent distinct grains or update frequencies.
+* Wide denormalized tables, known as One Big Table, eliminate query joins completely, maximizing scan and filter speeds in modern columnar platforms.
+* Deploy wide tables exclusively on column-oriented engines to avoid the severe memory and disk I/O thrashing inherent to wide row-store tables.
+* Avoid tracking frequent Slowly Changing Dimension updates directly in wide tables to prevent massive write amplification and file partition rewrites.
+* Combine all three architectures within a medallion lakehouse: raw event logs in Bronze, conformed star schemas in Silver, and dual star schema and OBT presentations in Gold.

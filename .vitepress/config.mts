@@ -133,6 +133,10 @@ export default defineConfig({
                 text: "Fact table design and types",
                 link: "/modeling/fact-table-design-and-types",
               },
+              {
+                text: "Specialized fact designs",
+                link: "/modeling/specialized-fact-designs",
+              },
       //       ],
       //     },
       //     {
