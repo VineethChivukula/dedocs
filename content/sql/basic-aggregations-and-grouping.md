@@ -1,76 +1,90 @@
 # Basic aggregations and grouping
 
-## Overview
+SQL aggregation functions summarize multiple rows of data into computed
+metrics such as counts, sums, averages, minimums, and maximums. When combined
+with the `GROUP BY` clause, aggregation partitions row streams into discrete
+groups, while the `HAVING` clause filters the aggregated results.
 
-SQL aggregation functions summarize multiple rows of data into computed metrics such as counts, sums, averages, minimums, and maximums. When combined with the `GROUP BY` clause, aggregation partitions row streams into discrete groups, while the `HAVING` clause filters the aggregated results.
+This guide provides an end-to-end operational reference for aggregate
+functions, multi-column grouping, the logical query execution pipeline, and the
+fundamental differences between `WHERE` and `HAVING` using the canonical
+Stanford University course enrollment dataset.
 
-This guide provides an end-to-end operational reference for aggregate functions, multi-column grouping, the logical query execution pipeline, and the fundamental differences between `WHERE` and `HAVING`.
+## Reference dataset
 
-## Example dataset
+The queries in this guide use the following `course_enrollments` table, which
+includes enrollments across multiple academic departments, registration dates,
+and a null tuition fee representing an audited course:
 
-The queries in this guide use the following `Orders` table, which includes orders across multiple categories, historical dates, and a null order amount:
-
-| `OrderID` | `CustomerID` | `Category` | `OrderAmount` | `OrderDate` |
+| `enrollment_id` | `student_id` | `department_name` | `tuition_fee` | `enrollment_date` |
 | :--- | :--- | :--- | :--- | :--- |
-| 101 | C1 | Electronics | 300.00 | 2026-01-10 |
-| 102 | C2 | Electronics | 700.00 | 2026-01-15 |
-| 103 | C1 | Books | 40.00 | 2026-01-20 |
-| 104 | C3 | Books | `NULL` | 2026-02-01 |
-| 105 | C2 | Clothing | 150.00 | 2025-12-28 |
-| 106 | C4 | Clothing | 250.00 | 2026-02-14 |
+| `101` | `S1` | Computer Science | `1200.00` | `2026-01-10` |
+| `102` | `S2` | Computer Science | `1500.00` | `2026-01-15` |
+| `103` | `S1` | Mathematics | `800.00` | `2026-01-20` |
+| `104` | `S3` | Mathematics | `NULL` | `2026-02-01` |
+| `105` | `S2` | Statistics | `900.00` | `2025-12-28` |
+| `106` | `S4` | Statistics | `950.00` | `2026-02-14` |
 
 ## Global aggregate functions
 
-When a query omits the `GROUP BY` clause, the database treats all matching rows as a single global group:
+When a query omits the `GROUP BY` clause, the database treats all matching rows
+as a single global group:
 
 ```sql
-SELECT
-  COUNT(*) AS TotalOrders,
-  COUNT(OrderAmount) AS OrdersWithAmounts,
-  SUM(OrderAmount) AS TotalRevenue,
-  ROUND(AVG(OrderAmount), 2) AS AverageRevenue,
-  MIN(OrderAmount) AS SmallestOrder,
-  MAX(OrderAmount) AS LargestOrder
-FROM Orders;
+SELECT 
+    COUNT(*)                        AS total_enrollments,
+    COUNT(tuition_fee)              AS paid_enrollments,
+    SUM(tuition_fee)                AS total_tuition_revenue,
+    ROUND(AVG(tuition_fee), 2)      AS average_tuition_fee,
+    MIN(tuition_fee)                AS lowest_tuition_fee,
+    MAX(tuition_fee)                AS highest_tuition_fee
+FROM course_enrollments;
 ```
 
 ### Global aggregation output table
 
-| `TotalOrders` | `OrdersWithAmounts` | `TotalRevenue` | `AverageRevenue` | `SmallestOrder` | `LargestOrder` |
+| `total_enrollments` | `paid_enrollments` | `total_tuition_revenue` | `average_tuition_fee` | `lowest_tuition_fee` | `highest_tuition_fee` |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 6 | 5 | 1440.00 | 288.00 | 40.00 | 700.00 |
+| `6` | `5` | `5350.00` | `1070.00` | `800.00` | `1500.00` |
 
-### Mechanics of individual aggregate functions
+### Aggregate function calculations
 
-- `COUNT(*)`: returns `6`, counting every record in the table regardless of null values.
-- `COUNT(OrderAmount)`: returns `5`, skipping order `104` because its amount is `NULL`.
-- `SUM(OrderAmount)`: calculates `300 + 700 + 40 + 150 + 250 = 1440.00`, ignoring null values.
-- `AVG(OrderAmount)`: divides `1440.00` by `5` rather than `6`, computing `288.00`.
-- `MIN(OrderAmount)` and `MAX(OrderAmount)`: evaluate the smallest and largest non-null values, returning `40.00` and `700.00`.
+- `COUNT(*)`: returns `6`, counting every record in the table regardless of null
+  values.
+- `COUNT(tuition_fee)`: returns `5`, skipping enrollment `104` because its fee is
+  null.
+- `SUM(tuition_fee)`: calculates `1200 + 1500 + 800 + 900 + 950 = 5350.00`,
+  ignoring null values.
+- `AVG(tuition_fee)`: divides `5350.00` by `5` rather than `6`, computing
+  `1070.00`.
+- `MIN(tuition_fee)` and `MAX(tuition_fee)`: evaluate the smallest and largest
+  non-null values, returning `800.00` and `1500.00`.
 
 ## Grouping with `GROUP BY`
 
-The `GROUP BY` clause divides the row stream into buckets sharing identical values in the grouping columns. The engine computes aggregates independently for each bucket.
+The `GROUP BY` clause divides the row stream into buckets sharing identical
+values in the grouping columns. The engine computes aggregates independently
+for each bucket:
 
 ```sql
-SELECT
-  Category,
-  COUNT(*) AS OrderCount,
-  COUNT(OrderAmount) AS PaidOrderCount,
-  COALESCE(SUM(OrderAmount), 0.00) AS CategoryRevenue,
-  ROUND(COALESCE(AVG(OrderAmount), 0.00), 2) AS CategoryAvg
-FROM Orders
-GROUP BY Category
-ORDER BY CategoryRevenue DESC;
+SELECT 
+    department_name,
+    COUNT(*)                                   AS enrollment_count,
+    COUNT(tuition_fee)                         AS paid_count,
+    COALESCE(SUM(tuition_fee), 0.00)           AS total_revenue,
+    ROUND(COALESCE(AVG(tuition_fee), 0.00), 2) AS average_revenue
+FROM course_enrollments
+GROUP BY department_name
+ORDER BY total_revenue DESC;
 ```
 
 ### Grouped output table
 
-| `Category` | `OrderCount` | `PaidOrderCount` | `CategoryRevenue` | `CategoryAvg` |
+| `department_name` | `enrollment_count` | `paid_count` | `total_revenue` | `average_revenue` |
 | :--- | :--- | :--- | :--- | :--- |
-| Electronics | 2 | 2 | 1000.00 | 500.00 |
-| Clothing | 2 | 2 | 400.00 | 200.00 |
-| Books | 2 | 1 | 40.00 | 40.00 |
+| Computer Science | `2` | `2` | `2700.00` | `1350.00` |
+| Statistics | `2` | `2` | `1850.00` | `925.00` |
+| Mathematics | `2` | `1` | `800.00` | `800.00` |
 
 ### The mandatory `GROUP BY` projection rule
 
@@ -79,25 +93,25 @@ Every column in the `SELECT` projection list must satisfy one of two rules:
 1. The column appears in the `GROUP BY` clause.
 2. The column resides inside an aggregate function.
 
-Selecting a bare column that isn't grouped causes a relational ambiguity error:
+Selecting an un-grouped column causes a relational ambiguity error:
 
 ```sql
 -- INVALID: The database rejects this query in standard SQL
-SELECT Category, OrderDate, SUM(OrderAmount)
-FROM Orders
-GROUP BY Category;
+SELECT department_name, enrollment_date, SUM(tuition_fee)
+FROM course_enrollments
+GROUP BY department_name;
 ```
 
-Because `Electronics` contains two distinct dates on 2026-01-10 and 2026-01-15, the engine can't decide which date to display for the consolidated row.
+Because Computer Science contains two distinct dates on 2026-01-10 and
+2026-01-15, the engine can't decide which date to display for the
+consolidated row.
 
 ## Logical execution pipeline: `WHERE` versus `HAVING`
 
-Understanding how `WHERE`, `GROUP BY`, and `HAVING` interact requires inspecting the internal logical query processing order.
+Understanding how `WHERE`, `GROUP BY`, and `HAVING` interact requires inspecting
+the internal logical query processing order:
 
 ```mermaid
----
-title: Logical query processing order
----
 flowchart LR
     F["1. FROM<br/>Read source tables"] --> W["2. WHERE<br/>Filter individual rows"]
     W --> G["3. GROUP BY<br/>Partition rows into buckets"]
@@ -109,102 +123,108 @@ flowchart LR
 
 ### End-to-end pipeline demonstration
 
-Consider this query filtering by date and aggregate revenue:
+Consider this query filtering by registration date and aggregate revenue:
 
 ```sql
-SELECT
-  Category,
-  COUNT(*) AS TotalOrders,
-  SUM(OrderAmount) AS TotalRevenue
-FROM Orders
-WHERE OrderDate >= '2026-01-01'
-GROUP BY Category
-HAVING SUM(OrderAmount) > 100.00
-ORDER BY TotalRevenue DESC;
+SELECT 
+    department_name,
+    COUNT(*)         AS total_enrollments,
+    SUM(tuition_fee) AS total_revenue
+FROM course_enrollments
+WHERE enrollment_date >= '2026-01-01'
+GROUP BY department_name
+HAVING SUM(tuition_fee) > 1000.00
+ORDER BY total_revenue DESC;
 ```
 
 #### Step 1: `WHERE` filters raw rows
 
-The engine evaluates `OrderDate >= '2026-01-01'`. Order `105` has a date of `2025-12-28`, so the engine eliminates it immediately. Five rows remain:
+The engine evaluates `enrollment_date >= '2026-01-01'`. Enrollment `105` has a
+date of `2025-12-28`, so the engine eliminates it immediately. Five rows
+remain:
 
-| `OrderID` | `Category` | `OrderAmount` | `OrderDate` |
+| `enrollment_id` | `department_name` | `tuition_fee` | `enrollment_date` |
 | :--- | :--- | :--- | :--- |
-| 101 | Electronics | 300.00 | 2026-01-10 |
-| 102 | Electronics | 700.00 | 2026-01-15 |
-| 103 | Books | 40.00 | 2026-01-20 |
-| 104 | Books | `NULL` | 2026-02-01 |
-| 106 | Clothing | 250.00 | 2026-02-14 |
+| `101` | Computer Science | `1200.00` | `2026-01-10` |
+| `102` | Computer Science | `1500.00` | `2026-01-15` |
+| `103` | Mathematics | `800.00` | `2026-01-20` |
+| `104` | Mathematics | `NULL` | `2026-02-01` |
+| `106` | Statistics | `950.00` | `2026-02-14` |
 
 #### Step 2: `GROUP BY` forms intermediate buckets
 
-The engine groups the surviving rows by `Category`:
+The engine groups the surviving rows by `department_name`:
 
-- **Electronics bucket**: orders 101, 102
-- **Books bucket**: orders 103, 104
-- **Clothing bucket**: order 106
+- Computer Science: enrollments 101 and 102
+- Mathematics: enrollments 103 and 104
+- Statistics: enrollment 106
 
 #### Step 3: calculation of aggregate values
 
-- Electronics: `COUNT(*) = 2`, `SUM(OrderAmount) = 1000.00`
-- Books: `COUNT(*) = 2`, `SUM(OrderAmount) = 40.00`
-- Clothing: `COUNT(*) = 1`, `SUM(OrderAmount) = 250.00`
+- Computer Science: `COUNT(*) = 2`, `SUM(tuition_fee) = 2700.00`
+- Mathematics: `COUNT(*) = 2`, `SUM(tuition_fee) = 800.00`
+- Statistics: `COUNT(*) = 1`, `SUM(tuition_fee) = 950.00`
 
 #### Step 4: `HAVING` filters aggregate buckets
 
-The engine evaluates `SUM(OrderAmount) > 100.00`:
+The engine evaluates `SUM(tuition_fee) > 1000.00`:
 
-- Electronics with `1000.00 > 100.00`: passes.
-- Clothing with `250.00 > 100.00`: passes.
-- Books with `40.00 > 100.00`: fails, so the engine discards it.
+- Computer Science with `2700.00 > 1000.00`: passes.
+- Statistics with `950.00 > 1000.00`: fails, so the engine discards it.
+- Mathematics with `800.00 > 1000.00`: fails, so the engine discards it.
 
 #### Step 5: `SELECT` and `ORDER BY` produce the final output
 
-| `Category` | `TotalOrders` | `TotalRevenue` |
+| `department_name` | `total_enrollments` | `total_revenue` |
 | :--- | :--- | :--- |
-| Electronics | 2 | 1000.00 |
-| Clothing | 1 | 250.00 |
+| Computer Science | `2` | `2700.00` |
 
 ## Common pitfalls
 
+When writing aggregate queries, watch for these common mistakes:
+
 ### Placing row filters in `HAVING` instead of `WHERE`
 
-A `HAVING` clause can technically filter by un-aggregated columns if they're present in `GROUP BY`, but doing so forces the database to group unnecessary data before discarding it:
+A `HAVING` clause can technically filter by un-aggregated columns if they appear
+in `GROUP BY`, but doing so forces the database to group unnecessary data
+before discarding it:
 
 ```sql
--- Inefficient: groups all rows before discarding categories
-SELECT Category, SUM(OrderAmount)
-FROM Orders
-GROUP BY Category
-HAVING Category = 'Electronics';
+-- Inefficient: groups all rows before discarding departments
+SELECT department_name, SUM(tuition_fee)
+FROM course_enrollments
+GROUP BY department_name
+HAVING department_name = 'Computer Science';
 
 -- Efficient: filters rows before performing the group and aggregate pass
-SELECT Category, SUM(OrderAmount)
-FROM Orders
-WHERE Category = 'Electronics'
-GROUP BY Category;
+SELECT department_name, SUM(tuition_fee)
+FROM course_enrollments
+WHERE department_name = 'Computer Science'
+GROUP BY department_name;
 ```
 
-Filtering with `WHERE` reduces memory consumption and leverages table indexes.
+Filtering with `WHERE` reduces memory consumption and uses table indexes.
 
 ### Placing aggregate expressions in `WHERE`
 
-Attempting to filter by an aggregate in `WHERE` triggers a compilation error:
+Attempting to filter by an aggregate in `WHERE` triggers a syntax error:
 
 ```sql
 -- INVALID: Aggregates are forbidden in WHERE
-SELECT Category, SUM(OrderAmount)
-FROM Orders
-WHERE SUM(OrderAmount) > 500.00
-GROUP BY Category;
+SELECT department_name, SUM(tuition_fee)
+FROM course_enrollments
+WHERE SUM(tuition_fee) > 1000.00
+GROUP BY department_name;
 ```
 
-Because `WHERE` executes before groups exist, the engine hasn't calculated the aggregate value yet. Always place aggregate thresholds in `HAVING`.
+Because `WHERE` executes before groups exist, the engine hasn't calculated the
+aggregate value yet. Always place aggregate thresholds in `HAVING`.
 
-## Key takeaways
+## What's next
 
-- Use global aggregate functions to compute summary metrics across an entire table.
-- `COUNT(*)` counts rows, while `COUNT(column)` and `AVG(column)` skip null values.
-- Every non-aggregated column in the `SELECT` list must appear in the `GROUP BY` clause.
-- `WHERE` filters input records before grouping occurs.
-- `HAVING` filters aggregated group records after grouping completes.
-- Always apply row filters in `WHERE` rather than `HAVING` to minimize memory pressure and query run times.
+- Explore relational join types and grouping across tables in
+  [Fundamental joins](/sql/fundamental-joins).
+- Learn window functions, partitions, and moving averages in
+  [Analytical and window functions](/sql/analytical-and-window-functions).
+- Master multi-level grouping and cube operations in
+  [Multidimensional aggregation](/sql/multidimensional-aggregation).

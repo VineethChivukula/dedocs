@@ -1,353 +1,378 @@
-# Specialized fact table designs
+# Specialized fact designs
 
-## Overview
+Specialized fact table designs extend dimensional modeling to handle complex
+analytical patterns that standard transaction fact tables don't represent
+directly. These patterns include recording interactions that produce no numeric
+metrics, managing parent-child operational documents such as invoices, and
+discovering activities that failed to occur.
 
-Specialized fact table designs extend foundational dimensional modeling to
-address complex real-world operational scenarios. These scenarios include
-recording events that produce no numeric metrics, managing multi-level
-parent-child business documents, and preserving strict grain consistency across
-analytical reporting layers.
+While standard transaction fact tables record numeric measurements such as unit
+prices and quantities alongside foreign keys, enterprise workflows frequently
+require tracking appointments, course schedules, or multi-tiered documents.
+Applying specialized fact designs helps you capture these events while
+preserving strict grain consistency and preventing reporting errors.
 
-While standard transaction fact tables capture numeric measures alongside
-foreign keys, enterprise processes frequently require capturing interactions,
-eligibility conditions, and multi-tiered document hierarchies that fall outside
-standard measurement schemas.
+## When to use specialized fact patterns
 
-```mermaid
----
-title: Factless fact table patterns
----
-flowchart TD
-    Root["Factless Fact Table Patterns"]
+Use the following decision matrix to choose the appropriate specialized fact
+table pattern for your data model:
 
-    Root --> E["Event Tracking"]
-    Root --> C["Coverage & Eligibility"]
+| Pattern | Scenario | Key challenge | Design solution | Analytical trade-off |
+| :--- | :--- | :--- | :--- | :--- |
+| **Event tracking `factless` table** | Student advising sessions, course attendance | The interaction produces no direct numeric measurement | Combine foreign keys with a constant counter column, such as `event_count = 1` | Queries compute volumes by summing the counter rather than counting keys |
+| **Coverage `factless` table** | Scheduled course offerings, room reservations | Need to detect non-events, such as scheduled courses with zero enrollments | Record the universe of scheduled conditions across dimensions | Requires set difference queries with `NOT EXISTS` against transaction tables |
+| **Allocated line-item fact table** | Student tuition invoices with general campus fees | Parent documents contain metrics at both header and line-item levels | Allocate header fees down to individual line items using a business formula | Requires agreed-upon allocation rules among stakeholders |
+| **Separate header and line-item tables** | Financial billing where legal rules prohibit allocation | Stakeholders don't agree on an allocation formula | Build two distinct fact tables: one at header grain, one at line grain | Users can't slice header fees by line-item dimensions, such as course |
 
-    E --> E1["Captures process occurrences"]
-    E --> E2["Zero measurement metrics"]
-    E --> E3["Explicit count artifact column"]
+## `Factless` fact tables
 
-    C --> C1["Records what could occur"]
-    C --> C2["Identifies non-events"]
-    C --> C3["Set difference analysis"]
-```
+A `factless` fact table contains foreign keys that reference participating
+dimension tables, but contains no independent numeric measurement metrics. The
+table captures the relationship or collision among business entities at a
+specific point in time.
 
-## Factless fact tables
+Dimensional architectures use two distinct types of `factless` fact tables:
+event tracking tables and coverage tables.
 
-A factless fact table contains no numeric measurement metrics, such as sales
-revenue, unit cost, or quantity ordered. Instead, it consists entirely of
-composite foreign keys referencing participating dimension tables. Its purpose
-is to record the logical association or collision of dimensions at a specific
-point in time and space.
+### Event tracking tables
 
-Factless fact tables fall into two primary architectural patterns: event
-tracking tables and coverage tables.
+Event tracking tables record occurrences where the event itself is the metric.
 
-### Event tracking factless tables
+Consider student academic advising sessions at Stanford University. When a
+student meets with an academic advisor, the interaction involves several
+entities: the student, the faculty advisor, the academic department, and the
+appointment date. The meeting produces no direct numerical metric such as dollar
+amounts or hours billed, yet university leaders need to analyze advising
+frequencies across departments and student cohorts.
 
-Event tracking factless tables record the occurrence of an event involving
-multiple business entities where the process produces no numeric measurement.
+#### Design pattern
 
-#### Typical operational examples
-
-- University student course registrations linking student, course, term, and
-  instructor.
-- Classroom employee attendance tracking linking employee, facility, and date.
-- Hospital patient admissions linking patient, clinic, physician, and date.
-- Safety incident reports linking facility, equipment, operator, and date.
-
-#### Architectural design pattern
-
-The table structure consists of foreign keys referencing each participating
+The table structure consists of foreign keys linking to each participating
 dimension:
 
 ```sql
-CREATE TABLE factless_student_registration (
-    term_key           INT NOT NULL REFERENCES dim_term(term_key),
-    student_key        INT NOT NULL REFERENCES dim_student(student_key),
-    course_key         INT NOT NULL REFERENCES dim_course(course_key),
-    instructor_key     INT NOT NULL REFERENCES dim_instructor(instructor_key),
-    registration_count INT NOT NULL DEFAULT 1,
-    PRIMARY KEY (term_key, student_key, course_key)
+CREATE TABLE factless_advising_session (
+    advising_session_key INT NOT NULL,
+    date_key             INT NOT NULL REFERENCES dim_date(date_key),
+    student_key          INT NOT NULL REFERENCES dim_student(student_key),
+    advisor_key          INT NOT NULL REFERENCES dim_instructor(instructor_key),
+    department_key       INT NOT NULL REFERENCES dim_department(department_key),
+    session_count        INT NOT NULL DEFAULT 1,
+    PRIMARY KEY (advising_session_key)
 );
 ```
 
 #### The count artifact column
 
-To simplify SQL queries and support straightforward aggregations in business
-intelligence tools, designers frequently include an explicit integer column
-assigned the constant value `1`, including `registration_count = 1` or
+To simplify queries in business intelligence tools, include an explicit integer
+column assigned the constant value `1`, such as `session_count = 1` or
 `event_count = 1`.
 
-This artifact column allows business analysts to calculate total event volumes
-using standard `SUM(registration_count)` queries rather than ambiguous
-`COUNT(student_key)` or computationally expensive `COUNT(DISTINCT student_key)`
-queries.
+This column lets analysts calculate total event volumes using standard
+`SUM(session_count)` queries. Relying on `COUNT(student_key)` or
+`COUNT(DISTINCT student_key)` can produce unexpected results:
 
-### Coverage and non-event factless tables
+- `COUNT(student_key)` counts rows, but if an outer join introduces null values,
+  it excludes those records or misleads report builders.
+- `COUNT(DISTINCT student_key)` calculates the number of unique participating
+  students rather than the total number of advising sessions.
+- In distributed analytical engines, `SUM()` operations run as fast, streaming
+  aggregations, whereas `COUNT(DISTINCT)` requires expensive global shuffle
+  operations.
 
-Coverage factless tables record relationships that could or should occur,
-enabling data teams to discover activity that never occurred.
+### Coverage and non-event tables
 
-#### Typical operational examples
+Standard transaction fact tables record rows only when an event occurs. If the
+university schedules a course for the Autumn quarter but no students register
+for it, a transactional registration table contains no record for that course.
 
-- Products placed on active promotion in retail stores across specific calendar
-  dates.
-- Sales representative territory assignments defining regional coverage.
-- Facility room reservation schedules recording booking availability.
+To identify what failed to happen, you must use a coverage table. A coverage
+`factless` table records the complete universe of planned or possible events.
 
-#### Query mechanics for non-event analysis
+In the Stanford University scenario, the registrar publishes a master course
+schedule before registration opens. The coverage table records every course
+offering assigned to a classroom, an instructor, and a term:
 
-Standard transactional sales fact tables record rows only when an event
-occurs. If a product on promotion fails to sell, a transaction fact table writes
-no row for that item.
-
-To identify promoted products that generated zero sales, analytical queries
-perform a set difference between the promotion coverage table and the
-transaction sales table using a `NOT EXISTS` clause or a `LEFT JOIN ... WHERE
-sales.key IS NULL` condition:
-
-```mermaid
----
-title: Non-event set difference query mechanics
----
-flowchart LR
-    Cov["Promotion Coverage Table<br/>(What was promoted)"] --> Diff["Set Difference<br/>NOT EXISTS"]
-    Sales["Transaction Sales Table<br/>(What actually sold)"] --> Diff
-    Diff --> Result["Unsold Promoted Products<br/>(Zero sales events)"]
+```sql
+CREATE TABLE factless_course_schedule (
+    schedule_key   INT NOT NULL,
+    term_key       INT NOT NULL REFERENCES dim_term(term_key),
+    course_key     INT NOT NULL REFERENCES dim_course(course_key),
+    instructor_key INT NOT NULL REFERENCES dim_instructor(instructor_key),
+    classroom_key  INT NOT NULL REFERENCES dim_classroom(classroom_key),
+    PRIMARY KEY (schedule_key)
+);
 ```
 
-## Header and line-item fact models
+#### Query non-events with anti-joins
+
+To identify courses that received zero student registrations, compare the
+coverage schedule table against the transactional course enrollment table using a
+set difference query.
+
+The following Mermaid diagram shows how the query engine isolates non-events by
+comparing the scheduled coverage against recorded enrollments:
+
+```mermaid
+flowchart LR
+    subgraph Scheduled["factless_course_schedule"]
+        S1["CS145 - Autumn 2026"]
+        S2["STATS116 - Autumn 2026"]
+        S3["MATH51 - Autumn 2026"]
+    end
+
+    subgraph Enrolled["fact_course_enrollment"]
+        E1["CS145 (45 Students)"]
+        E2["MATH51 (60 Students)"]
+    end
+
+    Scheduled -->|NOT EXISTS anti-semi-join| Result["Non-event Result<br/>STATS116 (0 Enrollments)"]
+    Enrolled -.->|Match found| Result
+```
+
+## Header and line-item models
 
 Operational source systems frequently generate parent-child transaction
-documents, such as sales orders, warehouse shipments, and purchase
-requisitions. These source documents combine header-level attributes and
-measures with line-item-level attributes and measures:
+documents, such as student tuition invoices, laboratory supply purchase orders,
+and research grant expense sheets. These documents group metrics at two distinct
+levels:
 
-- **Header attributes and metrics**: order date, customer identifier, payment
-  method, overall freight shipping fee, and order-level sales tax.
-- **Line-item attributes and metrics**: product SKU, unit price, ordered
-  quantity, discount percentage, and extended net amount.
+- Header metrics include total invoice balance, campus health service fees, student
+  union facility fees, and overall technology charges.
+- Line-item metrics include specific enrolled course tuition fees, course credit
+  units, lab material fees, and course-level fee discounts.
 
-```mermaid
----
-title: Header and line-item modeling strategies
----
-flowchart TD
-    Doc["Parent-Child Transaction Document<br/>(Header plus line items)"]
+Ralph `Kimball` outlines two primary approaches for modeling parent-child
+transactions: line-item grain with allocated parent metrics, and separate
+fact tables.
 
-    Doc --> A["Option A: Atomic Line Grain<br/>(Kimball recommendation)"]
-    Doc --> B["Option B: Split Fact Tables<br/>(Header and line split)"]
+### Line-item grain with allocated parent metrics
 
-    A --> A1["Proportionally allocate header facts"]
-    A --> A2["Retain header ID as degenerate dimension"]
-    A --> A3["Enables full dimensional slicing"]
+The primary method collapses the entire transaction document into a single fact
+table declared at the atomic line-item grain.
 
-    B --> B1["Order Header Fact: Order-level metrics"]
-    B --> B2["Order Line Fact: Line-level items"]
-    B --> B3["Used when allocation rules lack consensus"]
-```
+#### Tuition allocation methods
 
-### Option A - line-item grain with allocated header facts
+When you declare the grain as one row per document line item, you can't place
+unallocated header fees directly into the line rows. Instead, you must allocate
+header fees down to each line item using an explicit business weighting metric,
+such as course credit units, or line tuition amounts.
 
-Option A is the preferred dimensional modeling strategy recommended by Ralph
-Kimball.
+Consider a Stanford student tuition invoice:
 
-#### Mechanics
+- Total campus health service fee at header level: \$600.00
+- Course 1, CS145: 4 credit units
+- Course 2, STATS116: 3 credit units
+- Course 3, ENGR10: 3 credit units
+- Total registered units: 10 credit units
 
-1. **Atomic line-item grain**: the parent-child document collapses into a single
-   fact table declared at the atomic line-item grain.
-2. **Proportional header allocation**: the data pipeline pushes down and
-   proportionally allocates header-level metrics (such as freight, shipping
-   charges, or order-level taxes) to individual line items based on a clear
-   business weighting metric, such as line-item extended dollar value, physical
-   weight, or unit quantity.
-3. **Degenerate dimensions**: operational control numbers, such as
-   `order_number` or `invoice_number`, reside directly in the fact table row as
-   degenerate dimensions without referencing a separate dimension table. This
-   preserves document line groupings for downstream reporting.
+The data pipeline calculates the proportional fee allocation for each line:
 
-#### Advantages
+$$\text{Allocated Fee} = \text{Header Fee} \times \left( \frac{\text{Line Credit Units}}{\text{Total Credit Units}} \right)$$
 
-Allocating header costs down to the line-item level allows business users to
-slice and dice all financial metrics—including shipping costs and net
-profit—across all dimensions such as product category and brand.
+Applying this formula assigns:
 
-### Option B - separate header and line-item fact tables
+- CS145 receives $600 \times (4 / 10) = \$240.00$
+- STATS116 receives $600 \times (3 / 10) = \$180.00$
+- ENGR10 receives $600 \times (3 / 10) = \$180.00$
 
-If organizational stakeholders fail to reach agreement on a rational formula to
-allocate header charges down to line items, the data architecture must maintain
-two distinct fact tables:
+#### Degenerate dimensions
 
-1. **Order header fact table**: declared at the grain of one row per order. It
-   contains customer, date, shipping charges, and total tax, but excludes the
-   `product_key`.
-2. **Order line-item fact table**: declared at the grain of one row per line item.
-   It contains product references, quantities, and extended net amounts, but
-   excludes unallocated header metrics.
+The document identifier, such as `invoice_number`, stays directly in the fact
+table without linking to a separate dimension table. In dimensional modeling,
+architects call this attribute a degenerate dimension. It acts as an operational
+grouping key, allowing queries and reporting tools to reconstruct the original
+invoice document without requiring an extra join.
+
+### Separate header and line-item tables
+
+If university finance leaders don't agree on an allocation rule, you must build
+two separate fact tables:
+
+1. `fact_tuition_invoice_header`: declared at the grain of one row per student
+   invoice. Contains `student_key`, `date_key`, and the unallocated campus health
+   fees.
+2. `fact_tuition_invoice_line`: declared at the grain of one row per course line
+   item. Contains `course_key`, `credit_units`, and course tuition charges.
 
 #### Trade-offs
 
-This design introduces analytical limitations. Analysts are unable to evaluate
-product profitability because shipping costs reside exclusively in the parent
-header table, disconnected from individual product keys.
+Maintaining two tables prevents duplicate metric counting, but restricts
+analytical capability. Analysts can't evaluate the total cost or margin of
+teaching a specific course or department because campus health fees reside
+exclusively in the header table, disconnected from individual course keys.
 
-## Grain definition consistency
+## Maintain grain consistency
 
-Declaring the grain is the critical second step in Kimball's four-step
-dimensional design process. The grain is the binding contractual declaration of
-what an individual fact table row represents.
+Declaring the grain is the foundational step in dimensional modeling. The grain
+defines exactly what a single record in the fact table represents.
 
-### Core rules for maintaining grain consistency
+To maintain grain consistency across analytical queries:
 
-1. **Uniform fact granularity**: every numeric metric stored in a row must
-   strictly represent the declared grain. Storing order-level summary totals,
-   such as unallocated header shipping costs, in an atomic line-item fact row
-   violates grain consistency. When queried across date intervals or store
-   hierarchies, standard SQL `SUM()` aggregations overcount higher-level facts
-   by the number of line items, generating inflated totals.
-2. **Uniform dimension granularity**: every foreign key in the fact table must
-   take on a single, discrete value for each measurement event. If adding a new
-   dimension attribute introduces multiple values for a single measurement event,
-   the designer must either re-declare the fact table grain at a lower level or
-   extract the multi-valued attribute into a separate bridge table.
-3. **Atomic data focus**: dimensional models must store data at the lowest,
-   most atomic level of detail captured by the operational source process. Atomic
-   data provides resilience against unanticipated ad-hoc queries.
+1. **Every numeric metric must align with the declared grain**. Storing an
+   unallocated \$600 header fee across all three course lines violates the grain.
+   When an analyst runs a query summing fees across a department, the engine
+   sums \$600 three times, returning \$1,800 instead of \$600.
+2. **Every foreign key must have a single value per measurement**. If adding a
+   dimension introduces multiple values for a single line item, such as multiple
+   instructors co-teaching a single course section, extract that relationship
+   into a bridge table or adjust the grain declaration.
+3. **Store data at the most atomic grain available**. Storing atomic course-line
+   data lets you aggregate upward to departments, schools, and academic years
+   without losing operational detail.
 
-## Comprehensive implementation and schema definitions
+## Schema implementation for the university scenario
 
-The following PostgreSQL schema implements an allocated line-item order fact
-table, a promotion coverage factless table, and an event tracking factless table
-within a unified retail model:
+The following schema implements an allocated tuition line fact table, an advising
+session tracking table, and a course schedule coverage table.
 
 ### Schema definitions
 
 ```sql
--- 1. Line-Item Order Fact Table
--- Header Facts Allocated + Degenerate Dimensions
--- Declared Grain: One row per order line item
-CREATE TABLE fact_order_line (
-    order_number            VARCHAR(30)   NOT NULL, -- Degenerate Dimension
-    order_line_number       INT           NOT NULL, -- Degenerate Dimension
-    order_date_key          INT           NOT NULL REFERENCES dim_date(date_key),
-    customer_key            INT           NOT NULL REFERENCES dim_customer(customer_key),
-    product_key             INT           NOT NULL REFERENCES dim_product(product_key),
-    promotion_key           INT           NOT NULL REFERENCES dim_promotion(promotion_key),
+-- 1. Line-item tuition fact table with allocated header fees
+-- Grain: One row per course enrollment line on a student tuition invoice
+CREATE TABLE fact_tuition_line_item (
+    invoice_number       VARCHAR(32)   NOT NULL, -- Degenerate dimension
+    line_number          INT           NOT NULL, -- Degenerate dimension
+    invoice_date_key     INT           NOT NULL REFERENCES dim_date(date_key),
+    student_key          INT           NOT NULL REFERENCES dim_student(student_key),
+    course_key           INT           NOT NULL REFERENCES dim_course(course_key),
+    department_key       INT           NOT NULL REFERENCES dim_department(department_key),
     
-    -- Atomic Line-Item Facts
-    order_quantity          INT           NOT NULL,
-    extended_net_amount     DECIMAL(10, 2) NOT NULL,
+    -- Atomic line measures
+    enrolled_units       INT           NOT NULL,
+    course_tuition_fee   DECIMAL(10,2) NOT NULL,
     
-    -- Proportionally Allocated Header Fact
-    allocated_shipping_cost DECIMAL(10, 2) NOT NULL,
+    -- Proportionally allocated header fee
+    allocated_health_fee DECIMAL(10,2) NOT NULL,
     
-    PRIMARY KEY (order_number, order_line_number)
+    PRIMARY KEY (invoice_number, line_number)
 );
 
--- 2. Promotion Coverage Factless Fact Table
--- Declared Grain: One row per product on active promotion per store per date
-CREATE TABLE factless_promotion_coverage (
-    date_key                INT           NOT NULL REFERENCES dim_date(date_key),
-    store_key               INT           NOT NULL REFERENCES dim_store(store_key),
-    product_key             INT           NOT NULL REFERENCES dim_product(product_key),
-    promotion_key           INT           NOT NULL REFERENCES dim_promotion(promotion_key),
-    
-    PRIMARY KEY (date_key, store_key, product_key, promotion_key)
+-- 2. Course schedule coverage factless table
+-- Grain: One row per scheduled course section per term
+CREATE TABLE factless_course_schedule (
+    schedule_key         INT NOT NULL,
+    term_key             INT NOT NULL REFERENCES dim_term(term_key),
+    course_key           INT NOT NULL REFERENCES dim_course(course_key),
+    instructor_key       INT NOT NULL REFERENCES dim_instructor(instructor_key),
+    classroom_key        INT NOT NULL REFERENCES dim_classroom(classroom_key),
+    PRIMARY KEY (schedule_key)
 );
 
--- 3. Student Registration Event Factless Fact Table
--- Declared Grain: One row per student course registration per term
-CREATE TABLE factless_student_registration (
-    term_key                INT           NOT NULL REFERENCES dim_term(term_key),
-    student_key             INT           NOT NULL REFERENCES dim_student(student_key),
-    course_key              INT           NOT NULL REFERENCES dim_course(course_key),
-    instructor_key          INT           NOT NULL REFERENCES dim_instructor(instructor_key),
-    
-    -- Constant Artifact Column for Explicit SQL Aggregations
-    registration_count      INT           NOT NULL DEFAULT 1,
-    
-    PRIMARY KEY (term_key, student_key, course_key)
+-- 3. Student enrollment transaction fact table
+-- Grain: One row per completed student course registration
+CREATE TABLE fact_course_enrollment (
+    enrollment_key       INT NOT NULL,
+    term_key             INT NOT NULL REFERENCES dim_term(term_key),
+    student_key          INT NOT NULL REFERENCES dim_student(student_key),
+    course_key           INT NOT NULL REFERENCES dim_course(course_key),
+    enrollment_count     INT NOT NULL DEFAULT 1,
+    final_grade_points   DECIMAL(3,2),
+    PRIMARY KEY (enrollment_key)
 );
 ```
 
-### Non-event analysis query
+### Query scheduled courses with zero enrollments
 
-The following analytical query identifies products on active promotion on
-October 15, 2026, that recorded zero transaction sales:
+The following query identifies courses scheduled for the Autumn 2026 quarter
+that received zero student enrollments:
 
 ```sql
--- Identify promoted products that generated zero sales on a specific date
 SELECT 
-    p.product_name,
-    pr.promotion_name
-FROM factless_promotion_coverage AS cov
-JOIN dim_product AS p
-    ON cov.product_key = p.product_key
-JOIN dim_promotion AS pr
-    ON cov.promotion_key = pr.promotion_key
-WHERE cov.date_key = 20261015
+    c.course_code,
+    c.course_title,
+    d.department_name
+FROM factless_course_schedule AS sched
+JOIN dim_course AS c
+    ON sched.course_key = c.course_key
+JOIN dim_department AS d
+    ON c.department_key = d.department_key
+WHERE sched.term_key = 202601 -- Autumn 2026
   AND NOT EXISTS (
-      -- Verify whether transactions exist for this product and promotion
+      -- Check if any student registered for this course offering
       SELECT 1 
-      FROM fact_order_line AS sales
-      WHERE sales.product_key = cov.product_key
-        AND sales.promotion_key = cov.promotion_key
-        AND sales.order_date_key = cov.date_key
+      FROM fact_course_enrollment AS enr
+      WHERE enr.term_key = sched.term_key
+        AND enr.course_key = sched.course_key
   );
 ```
 
+### Query tuition revenue with allocated fees
+
+The following query calculates total tuition revenue and allocated health fees
+grouped by academic department:
+
+```sql
+SELECT 
+    d.department_name,
+    SUM(line.enrolled_units)       AS total_enrolled_units,
+    SUM(line.course_tuition_fee)   AS total_tuition_revenue,
+    SUM(line.allocated_health_fee) AS total_allocated_health_fees
+FROM fact_tuition_line_item AS line
+JOIN dim_department AS d
+    ON line.department_key = d.department_key
+WHERE line.invoice_date_key BETWEEN 20260901 AND 20261231
+GROUP BY d.department_name
+ORDER BY total_tuition_revenue DESC;
+```
+
+## Operational considerations and engine optimization
+
+When implementing specialized fact tables in modern columnar data warehouses
+such as BigQuery, consider the following technical factors:
+
+- When processing non-event queries with `NOT EXISTS`, query optimizers execute an
+  anti-semi-join. The engine stops scanning the enrollment table upon matching the
+  first row for that course, reducing data processing costs.
+- Avoid populating synthetic zero rows (such as `enrollment_count = 0`) in
+  transaction tables to track non-events. In columnar storage systems, storing
+  millions of empty combinations inflates metadata, degrades compression ratios,
+  and degrades full-table scan speeds. Use coverage tables instead.
+- Data engineering teams must avoid inventing ad hoc fee allocation formulas in
+  isolation. Document and verify the allocation methodology with finance and
+  registrar stakeholders before coding the transformation logic into your data pipeline.
+
 ## Common pitfalls
 
-### Grain mismatch and overcounting errors
+When designing specialized fact tables, watch for these common mistakes:
 
-Placing unallocated header-level facts, such as full order shipping charges,
-directly into atomic line-item rows creates severe overcounting errors.
+### Placing unallocated parent metrics on line items
 
-If an order contains five distinct line items and a \$50 shipping fee, storing
-\$50 on every line results in a calculated shipping cost of \$250 when an analyst
-runs a standard `SUM(shipping_fee)` query. Header metrics must always be
-proportionally allocated or maintained in a separate header-grain fact table.
+Duplicating an entire header metric on every line item causes serious metric
+inflation. If an invoice with five line items contains a single \$500 fee,
+storing \$500 on every row causes `SUM(fee)` queries to calculate \$2,500.
+Always allocate header metrics proportionally or maintain a separate
+header-grain table.
 
-### Unsanctioned allocation rules and governance disputes
+### Relying on distinct counts for event totals
 
-When data engineering teams arbitrarily invent allocation formulas without
-formal business approval, financial reporting discrepancies inevitably trigger
-disputes between department leaders.
+Omitting a constant count column from `factless` tables encourages analysts to
+write `COUNT(DISTINCT student_key)` to calculate event volumes. In a table
+tracking multiple advising sessions per student, this counts unique students,
+not sessions. Use an explicit `session_count = 1` column to support clean
+`SUM()` aggregations.
 
-Allocation rules must be formally owned, documented, and approved by finance or
-executive leadership before implementation in automated transformation
-pipelines.
+### Materializing synthetic non-event records
 
-### Explicit row generation for non-events in transaction tables
+Writing synthetic zero rows into standard event tables causes severe table
+bloat. If a university offers 2,000 courses across 50 terms, tracking non-events
+by generating empty records for every student-course pair yields hundreds of
+millions of unnecessary rows. Always capture non-events through set difference
+logic against coverage tables.
 
-Attempting to track non-events by inserting explicit zero-value rows, such as
-`order_quantity = 0`, into a standard transaction fact table introduces massive
-storage bloat.
+### Normalizing degenerate dimensions into separate tables
 
-Because transaction tables are sparse, populating zero-activity rows across
-every possible product, store, and date combination causes table volume to
-expand exponentially. Non-event analysis must rely on coverage factless tables
-and set difference queries rather than synthetic zero-value event records.
+Extracting control numbers like `invoice_number` into a standalone dimension
+table adds join overhead with zero analytical benefit. When an attribute has no
+additional context beyond its operational identifier, store it directly in the
+fact row as a degenerate dimension.
 
-### Ambiguous aggregation queries on factless tables
+## What's next
 
-Analysts querying factless tables without an explicit count column often confuse
-`COUNT(student_key)` with `COUNT(DISTINCT student_key)`.
-
-In an event factless table where students register for multiple courses,
-`COUNT(student_key)` calculates total course enrollments, while
-`COUNT(DISTINCT student_key)` calculates the number of unique participating
-students. Populating an explicit `registration_count = 1` column clarifies query
-intent and enables unambiguous `SUM(registration_count)` calculations across
-reporting dashboards.
-
-## Key takeaways
-
-- Use event tracking factless fact tables to record dimension associations that produce no numerical measures.
-- Include an explicit count column assigned the constant integer `1` in event factless tables to enable simple and unambiguous `SUM()` aggregations.
-- Use coverage factless tables to record the universe of active conditions or promotions, enabling non-event discovery through set difference queries against transaction tables.
-- Flatten parent-child transaction documents to atomic line-item grain by proportionally allocating header-level charges based on explicit business weighting factors.
-- Retain operational document identifiers as degenerate dimensions directly inside line-item fact tables without creating unnecessary physical dimension tables.
-- Maintain strict grain consistency by ensuring every fact and foreign key aligns with the declared level of detail, never mixing header totals into atomic lines.
-- Require finance or executive leadership to define and approve allocation formulas before implementing them in transformation pipelines.
+- Explore transaction, periodic snapshot, and accumulating snapshot designs in
+  [Fact table design and types](/modeling/fact-table-design-and-types).
+- Learn about primary keys, foreign keys, and bridge tables in
+  [Dimensional modeling methodology](/modeling/dimensional-modeling-methodology).
+- Review SQL join operations and anti-semi-join optimization in
+  [Fundamental joins](/sql/fundamental-joins).

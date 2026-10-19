@@ -47,3 +47,6 @@ ATM
 overcount
 overcounts
 overcounting
+(?i)subquer(y|ies)
+unary
+hoc

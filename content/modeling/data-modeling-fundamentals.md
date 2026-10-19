@@ -7,7 +7,7 @@ Data modeling translates real-world business processes, workflows, and domain ru
 Data modeling follows a three-tier continuum:
 
 1. **Conceptual data model**: captures business entities and relationships at the highest level of abstraction.
-2. **Logical data model**: adds structural detail, attributes, keys, and relational mechanics without binding to a specific database vendor.
+2. **Logical data model**: adds structural detail, attributes, keys, and relational integrity rules without binding to a specific database vendor.
 3. **Physical data model**: implements the schema for a specific database management system, specifying data types, indexes, partitioning, and storage configurations.
 
 ## Data modeling tiers
@@ -31,34 +31,37 @@ flowchart LR
 
 The Conceptual Data Model (CDM) represents the highest level of abstraction. It defines what the business domain contains rather than how a technical database operates.
 
-- **Target audience**: business stakeholders, domain subject matter experts, business analysts, and product architects.
-- **Core focus**: identifies primary business entities, such as customers, orders, products, and stores, and defines real-world interactions among them.
-- **Technology-agnostic**: operates independently of any Database Management System (DBMS), hardware platform, or programming language.
-- **No data types or technical attributes**: focuses on business concepts and boundaries rather than column names or data types.
-- **Direct many-to-many relationships**: represents real-world associations directly, such as students enrolling in courses or orders containing products, without introducing intermediate junction tables.
+A conceptual data model has the following characteristics:
+
+- Identifies primary business entities (such as customers, orders, products, and stores) and defines interactions among them for business stakeholders and analysts.
+- Operates independently of any Database Management System (DBMS), hardware platform, or programming language.
+- Focuses on business concepts and domain boundaries without defining column names, data types, or physical attributes.
+- Represents real-world associations directly (such as students enrolling in courses or orders containing products) without introducing intermediate junction tables.
 
 ### Logical data model
 
-The Logical Data Model (LDM) refines the conceptual blueprint by introducing structural rigor and relational mechanics. It establishes how entities interact within a structured data system.
+The Logical Data Model (LDM) refines the conceptual blueprint by introducing structural rigor and relational integrity rules. It establishes how entities interact within a structured data system.
 
-- **Target audience**: data architects, data engineers, software engineers, and app developers.
-- **Core focus**: translates business entities into explicit relations, defines business attributes, and resolves entity relationships.
-- **Attribute and type definitions**: lists all required attributes and generic data types, such as integer, string, date, and numeric, for each entity.
-- **Key identifiers**: specifies candidate keys, primary keys, and foreign keys to establish referential integrity between entities.
-- **Relationship resolution**: decomposes many-to-many relationships into two one-to-many relationships through associative entities. These entities are also known as junction tables, or bridge entities.
-- **Normalization**: organizes relational attributes into third normal form to eliminate data redundancy and prevent update anomalies.
-- **Engine-agnostic**: defines schema structures without depending on vendor-specific SQL syntax or physical storage parameters.
+A logical data model has the following characteristics:
+
+- Translates business entities into explicit relations, defines business attributes, and resolves entity relationships for data architects and software engineers.
+- Lists all required attributes and generic data types (such as integer, string, date, and numeric) for each entity.
+- Specifies candidate keys, primary keys, and foreign keys to establish referential integrity between entities.
+- Decomposes many-to-many relationships into two one-to-many relationships through associative entities (also known as junction tables or bridge entities).
+- Organizes relational attributes into third normal form to eliminate data redundancy and prevent update anomalies.
+- Defines schema structures without depending on vendor-specific SQL syntax or physical storage parameters.
 
 ### Physical data model
 
 The Physical Data Model (PDM) translates the logical model into concrete implementation artifacts for a target Database Management System (DBMS), such as PostgreSQL, MySQL, Snowflake, or BigQuery.
 
-- **Target audience**: database administrators, data platform engineers, and site reliability engineers.
-- **Core focus**: query execution, storage layout, indexing strategies, memory allocation, and operational performance.
-- **Engine-specific Data Definition Language (DDL)**: specifies concrete database data types, such as `BIGINT`, `VARCHAR(255)`, `TIMESTAMPTZ`, and `NUMERIC(10, 2)`.
-- **Integrity constraints**: enforces schema integrity through `PRIMARY KEY`, `FOREIGN KEY`, `NOT NULL`, `UNIQUE`, and `CHECK` constraints.
-- **Performance optimization**: defines B-tree indexes, hash indexes, clustering keys, and physical table partitioning strategies, such as partitioning tables by calendar year.
-- **Storage architecture**: aligns schemas with underlying storage mechanics, such as row-oriented heap pages versus columnar block layouts, buffer cache dynamics, and file structures.
+A physical data model has the following characteristics:
+
+- Focuses on query execution, storage layout, indexing strategies, memory allocation, and operational performance for database administrators and platform engineers.
+- Specifies engine-specific Data Definition Language (DDL) and concrete database data types, such as `BIGINT`, `VARCHAR(255)`, `TIMESTAMPTZ`, and `NUMERIC(10, 2)`.
+- Enforces schema integrity through `PRIMARY KEY`, `FOREIGN KEY`, `NOT NULL`, `UNIQUE`, and `CHECK` constraints.
+- Defines B-tree indexes, hash indexes, clustering keys, and physical table partitioning strategies (such as partitioning tables by calendar year).
+- Aligns schemas with underlying storage engines, such as row-oriented heap pages versus columnar block layouts, buffer cache dynamics, and file structures.
 
 ## Comparison of modeling tiers
 
@@ -81,22 +84,21 @@ An Entity Relationship Diagram (ERD) is a visual diagram that illustrates entiti
 
 An ERD models three foundational constructs:
 
-- **Entities**: distinct objects or concepts in the business domain.
-  - *Strong entity*: exists independently of other entities, such as a customer.
-  - *Weak entity*: depends on the existence of a parent entity for its identity, such as an order line item that can't exist without its parent order.
-- **Attributes**: properties or characteristics belonging to an entity.
-  - *Atomic attribute*: represents an indivisible unit of data, such as a status code.
-  - *Composite attribute*: consists of multiple sub-components, such as a street address composed of street name, city, state, and postal code.
-  - *Multi-valued attribute*: holds multiple values for a single entity instance, such as phone numbers, email addresses, or skill tags.
-- **Relationships**: logical associations or interactions between two or more entities, such as a customer placing an order.
+| Component | Definition | Examples |
+| :--- | :--- | :--- |
+| Entity | A distinct object or concept in the business domain. | Strong entity (customer), weak entity (order line item dependent on order) |
+| Attribute | A property or characteristic belonging to an entity. | Atomic (status code), composite (address), multi-valued (phone numbers) |
+| Relationship | A logical association or interaction between two or more entities. | Customer placing an order, student enrolling in a course section |
 
 ### Cardinality and multiplicity
 
 Cardinality defines the numerical limits of a relationship between participating entities:
 
-- **One-to-one relationships**: each instance of entity A associates with at most one instance of entity B, and each instance of B links to at most one instance of A. For example, a user account associates with one user profile.
-- **One-to-many relationships**: one instance of entity A associates with multiple instances of entity B, but each instance of B links back to exactly one instance of A. For example, a department contains many employees.
-- **Many-to-many relationships**: multiple instances of entity A associate with multiple instances of entity B. For example, students enroll in multiple courses, and each course contains multiple students.
+| Cardinality | Definition | Example |
+| :--- | :--- | :--- |
+| One-to-one (1:1) | Each instance of entity A associates with at most one instance of entity B, and each instance of B links to at most one instance of A. | A user account associates with one user profile. |
+| One-to-many (1:N) | One instance of entity A associates with multiple instances of entity B, but each instance of B links back to exactly one instance of A. | A department contains many employees. |
+| Many-to-many (M:N) | Multiple instances of entity A associate with multiple instances of entity B, and vice versa. | Students enroll in multiple courses, and each course contains multiple students. |
 
 ### Crow's foot notation
 
@@ -109,149 +111,155 @@ Crow's foot notation uses visual symbols at line endings to indicate minimum and
 | `>\|` | Mandatory many | One or more instances |
 | `>o` | Optional many | Zero, one, or more instances |
 
-## E-commerce implementation guide
+## University registration implementation guide
 
-The following end-to-end example tracks an e-commerce order system through conceptual, logical, and physical tiers.
+The following end-to-end example tracks an academic course registration
+system through conceptual, logical, and physical tiers.
 
 ### Conceptual model design
 
-The business domain requires three core entities: `Customer`, `Order`, and `Product`.
+The business domain requires three core entities: `Student`, `Course`, and
+`CourseSection`.
 
 Business rules define the following relationships:
 
-- A customer places zero or more orders.
-- An order belongs to exactly one customer.
-- An order contains one or more products.
-- A product appears in zero, one, or more orders.
+- A student registers for zero, one, or more course sections.
+- A course section belongs to exactly one parent course.
+- A course offers one or more course sections across academic terms.
+- A course section contains one or more enrolled students.
 
 ```mermaid
----
-title: Conceptual retail model
----
 flowchart LR
-    Customer[Customer]
-    Order[Order]
-    Product[Product]
+    Student[Student]
+    Section[CourseSection]
+    Course[Course]
 
-    Customer -->|"places (0..N)"| Order
-    Order -->|"contains (1..N)"| Product
+    Student -->|"registers for (0..N)"| Section
+    Course -->|"offers (1..N)"| Section
 ```
 
 ### Logical model design
 
-The logical model adds attributes, defines the data grain, and resolves the many-to-many relationship between orders and products.
+The logical model adds attributes, defines the data grain, and resolves the
+many-to-many relationship between students and course sections:
 
 1. **Establish the data grain**:
-   - `Customer`: one row represents one registered buyer.
-   - `Order`: one row represents one distinct purchase transaction.
-   - `OrderItem`: one row represents one distinct product line item in an order.
-   - `Product`: one row represents one distinct catalog item available for sale.
-2. **Resolve the many-to-many relationship**: introducing the associative entity `OrderItem` transforms the many-to-many relationship into two one-to-many relationships.
+   - `Student`: one row represents one registered student.
+   - `Course`: one row represents one catalog course offering.
+   - `CourseSection`: one row represents one scheduled class offering in a term.
+   - `Enrollment`: one row represents one student registration in a section.
+2. **Resolve the many-to-many relationship**: introducing the associative
+   entity `Enrollment` transforms the many-to-many relationship into two
+   one-to-many relationships.
 
 ```mermaid
----
-title: Logical retail ERD
----
 erDiagram
-    CUSTOMER ||--o{ ORDER : places
-    ORDER ||--|{ ORDER_ITEM : contains
-    PRODUCT ||--o{ ORDER_ITEM : "appears in"
+    STUDENT ||--o{ ENROLLMENT : registers
+    COURSE_SECTION ||--|{ ENROLLMENT : contains
+    COURSE ||--|{ COURSE_SECTION : offers
 
-    CUSTOMER {
-        int customer_id PK
-        string name
+    STUDENT {
+        int student_id PK
+        string full_name
         string email
     }
 
-    ORDER {
-        int order_id PK
-        int customer_id FK
-        date order_date
-        string status
+    COURSE {
+        int course_id PK
+        string course_code
+        string course_title
+        int unit_credits
     }
 
-    ORDER_ITEM {
-        int order_id PK_FK
-        int product_id PK_FK
-        int quantity
-        decimal unit_price
+    COURSE_SECTION {
+        int section_id PK
+        int course_id FK
+        string term_code
+        int max_capacity
     }
 
-    PRODUCT {
-        int product_id PK
-        string name
-        decimal list_price
+    ENROLLMENT {
+        bigint enrollment_id PK
+        int student_id FK
+        int section_id FK
+        date enrollment_date
+        string final_grade
     }
 ```
 
 ### Physical model implementation
 
-The physical model generates PostgreSQL Data Definition Language (DDL) statements with concrete types, composite primary keys, foreign key constraints, table partitioning, and secondary indexes:
+The physical model generates PostgreSQL Data Definition Language (DDL)
+statements with concrete types, composite primary keys, foreign key
+constraints, table partitioning, and secondary indexes:
 
 ```sql
--- 1. Physical Customer Table
-CREATE TABLE customers (
-    customer_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+-- 1. Physical Students Table
+CREATE TABLE students (
+    student_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    full_name VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
+    entry_year INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Physical Product Table
-CREATE TABLE products (
-    product_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    unit_price NUMERIC(10, 2) NOT NULL CHECK (unit_price >= 0.00),
-    stock_qty INTEGER NOT NULL DEFAULT 0 CHECK (stock_qty >= 0)
+-- 2. Physical Courses Table
+CREATE TABLE courses (
+    course_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_code VARCHAR(20) NOT NULL UNIQUE,
+    course_title VARCHAR(150) NOT NULL,
+    unit_credits INT NOT NULL CHECK (unit_credits > 0)
 );
 
--- 3. Physical Order Table (Partitioned by Year)
-CREATE TABLE orders (
-    order_id BIGINT GENERATED ALWAYS AS IDENTITY,
-    customer_id BIGINT NOT NULL,
-    order_date DATE NOT NULL,
-    order_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    PRIMARY KEY (order_id, order_date),
-    CONSTRAINT fk_orders_customer
-        FOREIGN KEY (customer_id)
-        REFERENCES customers (customer_id)
+-- 3. Physical Course Sections Table
+CREATE TABLE course_sections (
+    section_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    course_id BIGINT NOT NULL,
+    term_code VARCHAR(10) NOT NULL,
+    max_capacity INT NOT NULL CHECK (max_capacity > 0),
+    CONSTRAINT fk_sections_course
+        FOREIGN KEY (course_id)
+        REFERENCES courses (course_id)
         ON DELETE RESTRICT
-) PARTITION BY RANGE (order_date);
+);
 
--- Annual Partitions
-CREATE TABLE orders_2025 PARTITION OF orders
+-- Secondary Index for Course Sections Lookup
+CREATE INDEX idx_sections_course_id ON course_sections(course_id);
+
+-- 4. Physical Enrollments Junction Table (Partitioned by Academic Year)
+CREATE TABLE enrollments (
+    enrollment_id BIGINT GENERATED ALWAYS AS IDENTITY,
+    enrollment_date DATE NOT NULL,
+    student_id BIGINT NOT NULL,
+    section_id BIGINT NOT NULL,
+    final_grade VARCHAR(5),
+    PRIMARY KEY (enrollment_id, enrollment_date),
+    CONSTRAINT fk_enrollments_student
+        FOREIGN KEY (student_id)
+        REFERENCES students (student_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_enrollments_section
+        FOREIGN KEY (section_id)
+        REFERENCES course_sections (section_id)
+        ON DELETE RESTRICT
+) PARTITION BY RANGE (enrollment_date);
+
+-- Annual Partitions for Academic Years
+CREATE TABLE enrollments_2025 PARTITION OF enrollments
     FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
 
-CREATE TABLE orders_2026 PARTITION OF orders
+CREATE TABLE enrollments_2026 PARTITION OF enrollments
     FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
 
--- Secondary Index for Customer Lookups
-CREATE INDEX idx_orders_customer_id ON orders(customer_id);
-
--- 4. Physical OrderItem Junction Table
-CREATE TABLE order_items (
-    order_id BIGINT NOT NULL,
-    order_date DATE NOT NULL,
-    product_id BIGINT NOT NULL,
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
-    sale_price NUMERIC(10, 2) NOT NULL CHECK (sale_price >= 0.00),
-    PRIMARY KEY (order_id, order_date, product_id),
-    CONSTRAINT fk_items_order
-        FOREIGN KEY (order_id, order_date)
-        REFERENCES orders (order_id, order_date)
-        ON DELETE CASCADE,
-    CONSTRAINT fk_items_product
-        FOREIGN KEY (product_id)
-        REFERENCES products (product_id)
-        ON DELETE RESTRICT
-);
+-- Secondary Indexes for Join Acceleration
+CREATE INDEX idx_enrollments_student_id ON enrollments(student_id);
+CREATE INDEX idx_enrollments_section_id ON enrollments(section_id);
 ```
 
 This physical implementation applies several important design decisions:
 
-- **Partition key alignment**: the `orders` table partitions by `order_date`. In PostgreSQL, a unique or primary key on a partitioned table must include the partition column. Therefore, `orders` uses the composite primary key `(order_id, order_date)`.
-- **Composite foreign key reference**: because `orders` uses a composite primary key, the `order_items` table references both `order_id` and `order_date` to preserve referential integrity.
-- **Secondary foreign key indexing**: database engines such as PostgreSQL automatically index primary keys, but they don't create indexes for foreign keys. The statement creates `idx_orders_customer_id` so customer joins don't trigger sequential scans.
+- In PostgreSQL, primary keys on partitioned tables must include the partition column. Because the `enrollments` table partitions by `enrollment_date`, it uses the composite primary key `(enrollment_id, enrollment_date)`.
+- Database engines such as PostgreSQL automatically index primary keys, but they don't create indexes for foreign keys. Creating `idx_enrollments_student_id` and `idx_enrollments_section_id` ensures relational joins avoid sequential table scans.
 
 ## Common pitfalls
 
@@ -284,3 +292,12 @@ Combining tables early through `denormalization` to avoid table joins creates du
 - Define the exact grain of every table before writing DDL statements.
 - Index foreign key columns explicitly to ensure efficient joins and cascading updates.
 - Keep operational databases normalized, reserving `denormalization` for analytical workloads.
+
+## What's next
+
+- Explore entities, cardinality rules, and relationship notations in
+  [Entities, attributes, and relationships](/modeling/entities-attributes-and-relationships).
+- Learn functional dependencies and normal forms in
+  [Database normalization](/modeling/database-normalization).
+- Review relational model foundations, candidate keys, and constraints in
+  [Relational model concepts](/sql/relational-model-concepts).

@@ -1,4 +1,4 @@
-# Database normalization mechanics
+# Database normalization
 
 ## Overview
 
@@ -78,11 +78,13 @@ For example, `student_id` $\rightarrow$ `student_email` represents a functional 
 
 Relational design classifies attributes based on their relationship to candidate keys:
 
-- **Super key**: any combination of columns that uniquely identifies every tuple in a relation. A super key can include redundant columns.
-- **Candidate key**: a minimal super key with no redundant attributes. Removing any attribute from a candidate key destroys its uniqueness.
-- **Primary key**: the candidate key selected by the database architect as the official row identifier.
-- **Prime attribute**: an attribute that belongs to at least one candidate key.
-- **Non-prime attribute**: an attribute that belongs to no candidate key.
+| Term | Definition |
+| :--- | :--- |
+| Super key | Any combination of columns that uniquely identifies every tuple in a relation, including redundant columns. |
+| Candidate key | A minimal super key with no redundant attributes. Removing any attribute destroys uniqueness. |
+| Primary key | The candidate key selected by the database architect as the official row identifier. |
+| Prime attribute | An attribute that belongs to at least one candidate key. |
+| Non-prime attribute | An attribute that belongs to no candidate key. |
 
 ## Progressive normal forms
 
@@ -182,8 +184,8 @@ In 3NF, the rule allows an exception: if $Y$ is a prime attribute, determinant $
 
 While 3NF and BCNF cover most operational app needs, advanced relational theory defines higher levels of normalization:
 
-- **Fourth normal form**: eliminates non-trivial multi-valued dependencies, written as $X \twoheadrightarrow Y$. A multi-valued dependency occurs when attribute $X$ determines a set of independent values for attribute $Y$ and attribute $Z$. Storing independent multi-valued attributes in a single table produces Cartesian row multiplication. Splitting the independent attributes into separate tables achieves fourth normal form.
-- **Fifth normal form**: eliminates join dependencies and ensures lossless decomposition. A table satisfies fifth normal form, or project-join normal form, if engineers can't decompose it into smaller tables without altering the original relation upon reconstruction.
+- Fourth normal form (4NF) eliminates non-trivial multi-valued dependencies ($X \twoheadrightarrow Y$). A multi-valued dependency occurs when attribute $X$ determines a set of independent values for attribute $Y$ and attribute $Z$. Storing independent multi-valued attributes in a single table produces Cartesian row multiplication. Splitting the independent attributes into separate tables achieves 4NF.
+- Fifth normal form (5NF, or project-join normal form) eliminates join dependencies and ensures lossless decomposition. A table satisfies 5NF if it cannot be decomposed into smaller tables without altering the original relation upon reconstruction.
 
 ## Strategic `denormalization` for analytics
 
@@ -234,9 +236,9 @@ Analytical systems, such as data warehouses and data lakes, prioritize aggregate
 
 `Denormalization` manifests in production systems through several derived structures:
 
-- **Materialized views**: pre-compute expensive joins and store results on disk for rapid querying.
-- **Summary aggregation tables**: store pre-calculated metrics, such as daily revenue totals, monthly active counts, or customer lifetime spend.
-- **Lookup caches**: duplicate textual descriptive names directly inside high-throughput transactional records to eliminate runtime joins.
+- Materialized views pre-compute expensive joins and store results on disk for rapid querying.
+- Summary aggregation tables store pre-calculated metrics, such as daily revenue totals, monthly active counts, or customer lifetime spend.
+- Lookup caches duplicate textual descriptive names directly inside high-throughput transactional records to eliminate runtime joins.
 
 ## Step-by-step normalization example
 
@@ -265,8 +267,8 @@ In un-normalized form, an operational spreadsheet or legacy system often records
 
 This un-normalized structure creates operational hurdles:
 
-- **Non-atomic attributes**: embedding JSON arrays or comma-delimited strings prevents database engines from performing indexed `lookups`, filtering, or aggregations on individual course fields.
-- **Query friction**: computing average student grades or locating an instructor office requires parsing nested strings.
+- Embedding JSON arrays or comma-delimited strings prevents database engines from performing index searches, filtering, or aggregations on individual course fields.
+- Parsing nested strings to compute average student grades or locate instructor offices increases query complexity and compute costs.
 
 ### Step 1 - conversion to first normal form
 
@@ -299,8 +301,8 @@ The minimal combination that uniquely distinguishes each row is the composite ke
 
 Attribute classification:
 
-- **Prime attributes**: `student_id`, `course_code`.
-- **Non-prime attributes**: `student_name`, `course_title`, `instructor_name`, `instructor_office`, `grade`.
+- Prime attributes: `student_id`, `course_code`.
+- Non-prime attributes: `student_name`, `course_title`, `instructor_name`, `instructor_office`, `grade`.
 
 #### Functional dependency mapping
 
@@ -407,13 +409,13 @@ However, inspect the `courses` table closely. Inside `courses`:
 - `course_code` $\rightarrow$ `instructor_name`
 - `instructor_name` $\rightarrow$ `instructor_office`
 
-Here, `instructor_name` and `instructor_office` are both non-prime attributes. `instructor_office` doesn't depend directly on the primary key `course_code`—it depends on `instructor_name`. This chain represents a **transitive dependency**: $X \rightarrow Y$ and $Y \rightarrow Z$.
+Here, `instructor_name` and `instructor_office` are both non-prime attributes. `instructor_office` doesn't depend directly on the primary key `course_code`; it depends on `instructor_name`. This chain represents a **transitive dependency**: $X \rightarrow Y$ and $Y \rightarrow Z$.
 
 This transitive dependency introduces operational anomalies in the 2NF `courses` table:
 
-- **Insertion anomaly**: the university can't record Dr. Lovelace and her office `Lovelace Hall` until the department assigns her to teach an active course.
-- **Deletion anomaly**: if the department cancels `PHYS101` and Dr. Curie teaches no other course, deleting `PHYS101` deletes Dr. Curie and her office location from the system.
-- **Update anomaly**: if Dr. Gauss teaches multiple courses and moves offices, staff must locate and update every course taught by Dr. Gauss. Any missed row creates data divergence.
+- An insertion anomaly occurs because the university can't record Dr. Lovelace and her office `Lovelace Hall` until the department assigns her to teach an active course.
+- A deletion anomaly occurs because if the department cancels `PHYS101` and Dr. Curie teaches no other course, deleting `PHYS101` deletes Dr. Curie and her office location from the system.
+- An update anomaly occurs because if Dr. Gauss teaches multiple courses and moves offices, staff must locate and update every course taught by Dr. Gauss. Any missed row creates data divergence.
 
 ### Step 3 - conversion to third normal form
 
@@ -508,8 +510,8 @@ Extend the academic model with a student advising program governed by three busi
 
 Consider the relation `student_advising`:
 
-- **Attributes**: `student_id`, `subject_name`, `advisor_name`.
-- **Functional dependencies**:
+- Attributes: `student_id`, `subject_name`, `advisor_name`.
+- Functional dependencies:
   1. `{student_id, subject_name}` $\rightarrow$ `advisor_name`
   2. `advisor_name` $\rightarrow$ `subject_name`
 
@@ -535,10 +537,10 @@ Because all three columns belong to at least one candidate key, every attribute 
 - Inspect dependency 2: `advisor_name` $\rightarrow$ `subject_name`. Determinant `advisor_name` isn't a candidate key on its own. However, dependent attribute `subject_name` is a prime attribute. Because `subject_name` is prime, this dependency satisfies 3NF.
 - Despite passing 3NF, the relation violates BCNF because determinant `advisor_name` isn't a super key.
 
-This BCNF violation causes anomalies:
+This BCNF violation causes two anomalies:
 
-- **Insertion anomaly**: the administration can't record that Dr. Lovelace advises Computer Science until staff assigns a student to her.
-- **Update anomaly**: if Dr. Ramanujan switches departments, administrators must update multiple rows.
+- An insertion anomaly occurs because the administration can't record that Dr. Lovelace advises Computer Science until staff assigns a student to her.
+- An update anomaly occurs because if Dr. Ramanujan switches departments, administrators must update multiple rows.
 
 #### Decomposition into `Boyce-Codd` normal form tables
 
@@ -672,3 +674,12 @@ Modern cloud warehouses, including Snowflake and BigQuery, alongside relational 
 - Enforce that every determinant is a super key to achieve Boyce-Codd normal form.
 - Weigh the trade-off between BCNF normalization and functional dependency preservation.
 - Use 3NF and BCNF for write-intensive operational databases, reserving `denormalization` for read-intensive analytical data warehouses.
+
+## What's next
+
+- Explore enterprise bus matrices and dimensional modeling in
+  [Dimensional modeling methodology](/modeling/dimensional-modeling-methodology).
+- Compare star schemas, snowflake schemas, and wide flat tables in
+  [Schema architectures](/modeling/schema-architectures).
+- Learn relational algebra and join execution in
+  [Fundamental joins](/sql/fundamental-joins).

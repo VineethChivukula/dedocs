@@ -6,11 +6,11 @@ Entities, attributes, and relationships form the foundational building blocks of
 
 This guide explains:
 
-- Entity types, attribute classifications, and key mechanics.
+- Entity types, attribute classifications, and relational keys.
 - Relationship cardinality rules: 1:1, 1:N, and many-to-many.
 - Relationship degrees, participation constraints, and Crow's foot notation.
 - Enhanced entity-relationship concepts, such as generalization, specialization, and aggregation.
-- The mechanics of Online Transaction Processing (OLTP) junction tables versus dimensional bridge tables.
+- Online Transaction Processing (OLTP) junction tables versus dimensional bridge tables.
 - Weighting factors and ragged hierarchy navigation in analytical warehouses.
 - Common join anomalies, including row explosion, the fan trap, the chasm trap, and relational shredding.
 
@@ -23,9 +23,9 @@ Every relational schema organizes data using three primary abstractions: entitie
 title: Relational modeling building blocks
 ---
 flowchart LR
-    Entity["Entity<br/>Table / Object<br/>(Customer)"]
-    Attribute["Attributes<br/>Columns / Properties<br/>(Email, Name, Phone)"]
-    Relationship["Relationship<br/>Foreign Key / Junction<br/>(Places Order)"]
+    Entity["Entity<br/>Table / Object<br/>(Student)"]
+    Attribute["Attributes<br/>Columns / Properties<br/>(Email, Name, Major)"]
+    Relationship["Relationship<br/>Foreign Key / Junction<br/>(Enrolls in Course)"]
 
     Entity --- Attribute
     Entity -->|participates in| Relationship
@@ -39,8 +39,8 @@ A collection of similar entities forms an entity set. For example, all students 
 
 Data modeling distinguishes two categories of entities:
 
-- **Strong entities**: exist independently of other domain entities. A strong entity possesses a distinct primary key that uniquely identifies every instance. For example, a customer, student, or building is a strong entity.
-- **Weak entities**: depend on the existence of an identifying parent entity for identity. A weak entity lacks a primary key of its own. It relies on a partial key, or discriminator, combined with the primary key of the parent entity to establish uniqueness. For example, an order line item can't exist without an order, and a course section can't exist without its parent course.
+- Strong entities exist independently of other domain entities. A strong entity possesses a distinct primary key that uniquely identifies every instance (such as a student, instructor, or department).
+- Weak entities depend on the existence of an identifying parent entity for identity and lack a primary key of their own. A weak entity relies on a partial key (or discriminator) combined with the primary key of the parent entity to establish uniqueness (such as a course section that cannot exist without its parent course).
 
 ```mermaid
 ---
@@ -59,23 +59,25 @@ An attribute describes a property, characteristic, or measurement belonging to a
 
 Attributes fall into distinct structural classifications:
 
-- **Simple or atomic attributes**: store indivisible values that can't divide into smaller semantic units, such as a status code, an account balance, or a currency code.
-- **Composite attributes**: consist of multiple logical sub-elements. For example, a street address decomposes into street, city, state, and postal code. In relational databases, designers flatten composite attributes into separate columns.
-- **Multi-valued attributes**: hold multiple values for a single entity instance, such as several phone numbers, emergency contacts, or skill tags. Relational databases normalize multi-valued attributes into independent child tables connected through foreign keys to maintain first normal form.
-- **Derived attributes**: represent calculated values computed from stored attributes or runtime queries rather than static disk values. For example, age derives from `birth_date`, and line total derives from `quantity * unit_price`.
-- **Key attributes**: uniquely identify individual entity instances within an entity set, such as `customer_id` or `order_number`.
+| Attribute type | Structural rule | Example |
+| :--- | :--- | :--- |
+| Simple (atomic) | Stores indivisible values that cannot divide into smaller semantic units. | Status code, account balance, department code |
+| Composite | Consists of multiple logical sub-elements flattened into separate columns. | Street address decomposed into street, city, state, and postal code |
+| Multi-valued | Holds multiple values for a single entity instance, normalized into independent child tables. | Multiple phone numbers, emergency contacts, research tags |
+| Derived | Calculated values computed from stored attributes or queries rather than static disk values. | Age derived from `birth_date`, grade points derived from `credits * grade_points` |
+| Key | Uniquely identifies individual entity instances within an entity set. | `student_id`, `course_code` |
 
 ```mermaid
 ---
 title: Taxonomy of entity attributes
 ---
 flowchart TD
-    Entity["Employee Entity"]
-    A1["Simple: status_code"]
+    Entity["Student Entity"]
+    A1["Simple: standing_status"]
     A2["Composite: full_name<br/>(first_name, last_name)"]
-    A3["Multi-valued: phone_numbers<br/>(home, mobile, pager)"]
-    A4["Derived: years_of_service<br/>(from hire_date)"]
-    A5["Key: employee_id"]
+    A3["Multi-valued: phone_numbers<br/>(home, mobile)"]
+    A4["Derived: completed_credits<br/>(from graded courses)"]
+    A5["Key: student_id"]
 
     Entity --- A1
     Entity --- A2
@@ -88,12 +90,14 @@ flowchart TD
 
 In relational modeling, keys enforce row identity, establish referential integrity, and maintain uniqueness constraints:
 
-- **Super keys**: any combination of columns that uniquely identifies a row in a table. Super keys can contain extra, non-essential columns.
-- **Candidate keys**: a minimal super key with no redundant columns. Removing any column from a candidate key destroys its uniqueness property.
-- **Primary key**: the candidate key selected by the database architect as the official identifier for the entity. Primary keys must be unique, non-null, and immutable.
-- **Alternate keys**: candidate keys not chosen as the primary key. Engines enforce alternate keys using `UNIQUE` constraints.
-- **Composite keys**: primary keys or candidate keys consisting of two or more columns.
-- **Foreign keys**: columns that reference a primary key or unique key in another table, enforcing referential integrity.
+| Key type | Relational definition |
+| :--- | :--- |
+| Super key | Any combination of columns that uniquely identifies a row in a table, including redundant columns. |
+| Candidate key | A minimal super key with no redundant columns. Removing any column destroys uniqueness. |
+| Primary key | The minimal candidate key selected by the database architect as the official entity identifier. |
+| Alternate key | Candidate keys not chosen as the primary key, enforced using `UNIQUE` constraints. |
+| Composite key | Primary keys or candidate keys consisting of two or more columns. |
+| Foreign key | Columns that reference a primary key or unique key in another table to enforce referential integrity. |
 
 ## Cardinality and multiplicity
 
@@ -106,17 +110,17 @@ title: Fundamental relationship cardinalities
 flowchart LR
     subgraph OTO ["One-to-One (1:1)"]
         direction TB
-        User[User] <-->|Shared PK or Unique FK| Profile[Profile]
+        Student[Student] <-->|Shared PK or Unique FK| Profile[StudentProfile]
     end
 
     subgraph OTM ["One-to-Many (1:N)"]
         direction TB
-        Building[Building] -->|FK on Child Table| Apartment[Apartments]
+        Dept[Department] -->|FK on Child Table| Course[Courses]
     end
 
     subgraph MTM ["Many-to-Many (M:N)"]
         direction TB
-        Student[Student] <-->|Junction / Bridge Table| Course[Course]
+        Student2[Student] <-->|Junction Table| Course2[Course]
     end
 ```
 
@@ -133,26 +137,26 @@ Relational engines implement one-to-one relationships using two physical designs
 
 The child table references the parent table through one of two mechanisms:
 
-- **Shared primary key**: the child table declares its primary key column as both its `PRIMARY KEY` and a `FOREIGN KEY` referencing the parent table.
-- **Unique foreign key**: the child table declares a foreign key column with a `UNIQUE` constraint and a `NOT NULL` constraint.
+- Shared primary key: the child table declares its primary key column as both its `PRIMARY KEY` and a `FOREIGN KEY` referencing the parent table.
+- Unique foreign key: the child table declares a foreign key column with a `UNIQUE` constraint and a `NOT NULL` constraint.
 
 ```sql
 -- Split table implementation using a shared primary key
-CREATE TABLE users (
-    user_id       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    username      VARCHAR(50) NOT NULL UNIQUE,
+CREATE TABLE students (
+    student_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    student_name  VARCHAR(100) NOT NULL,
     email         VARCHAR(255) NOT NULL UNIQUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    enrolled_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE user_profiles (
-    user_id       BIGINT PRIMARY KEY, -- Shared PK and FK
-    date_of_birth DATE,
-    avatar_url    VARCHAR(500),
-    bio           TEXT,
-    CONSTRAINT fk_user_profiles_user
-        FOREIGN KEY (user_id)
-        REFERENCES users (user_id)
+CREATE TABLE student_profiles (
+    student_id        INTEGER PRIMARY KEY, -- Shared PK and FK
+    date_of_birth     DATE,
+    emergency_contact VARCHAR(100),
+    medical_notes     TEXT,
+    CONSTRAINT fk_student_profiles_student
+        FOREIGN KEY (student_id)
+        REFERENCES students (student_id)
         ON DELETE CASCADE
 );
 ```
@@ -167,9 +171,9 @@ Relational databases implement one-to-many relationships by placing the primary 
 
 Common examples include:
 
-- A building contains multiple apartments, where each apartment stores a `building_id` foreign key.
-- A department employs multiple employees, where each employee references a `department_id`.
-- A customer purchase order contains multiple line items, where each line item references an `order_id`.
+- A department has multiple courses, where each course stores a `department_id` foreign key.
+- A faculty member advises multiple students, where each student references an `advisor_id`.
+- A course divides into multiple sections, where each section references a `course_id`.
 
 ```sql
 CREATE TABLE departments (
@@ -199,8 +203,8 @@ In a many-to-many relationship, multiple instances of entity A associate with mu
 Common examples include:
 
 - Students enroll in multiple courses, and each course contains multiple students.
-- Tenants rent multiple apartments over time, and an apartment houses multiple tenants.
-- Patients receive multiple medical diagnoses during hospital visits, and each diagnosis applies to multiple patients.
+- Instructors teach across multiple departments, and each department employs multiple instructors.
+- Researchers collaborate across multiple university research grants.
 
 #### Relational constraint
 
@@ -229,10 +233,12 @@ Beyond basic cardinality, relationships possess structural properties that gover
 
 The degree of a relationship indicates the number of participating entities:
 
-- **Recursive relationships**: involve a single entity associating with itself, also called a `unary` relationship. Examples include organizational reporting structures, where an employee references a manager within the same table, and category trees.
-- **Binary relationships**: involve two distinct entities. Binary associations represent the vast majority of operational database interactions.
-- **Ternary relationships**: involve three distinct entities simultaneously. For example, a physician prescribes a specific drug treatment to a patient, linking `Physician`, `Patient`, and `Medication` in an atomic relationship.
-- **N-ary relationships**: involve four or more entities simultaneously. Teams typically decompose n-ary relationships into multiple binary associations using intermediate associative tables.
+| Relationship degree | Entity count | Structural rule and example |
+| :--- | :--- | :--- |
+| Recursive (unary) | 1 | A single entity associates with itself, such as a faculty member mentoring a junior colleague or course prerequisite trees. |
+| Binary | 2 | Two distinct entities interact, representing most relational operations (such as departments offering courses). |
+| Ternary | 3 | Three distinct entities link simultaneously, such as an instructor, a course section, and a classroom in a teaching assignment. |
+| N-ary | 4+ | Four or more entities link simultaneously, typically decomposed into binary associations via junction tables. |
 
 ```mermaid
 ---
@@ -241,19 +247,19 @@ title: Degrees of database relationships
 flowchart LR
     subgraph Recursive ["Recursive (Unary)"]
         direction TB
-        Emp[Employee] -->|supervises| Emp
+        Prof[Professor] -->|mentors| Prof
     end
 
     subgraph Binary ["Binary"]
         direction TB
-        Cust[Customer] -->|places| Ord[Order]
+        Dept[Department] -->|offers| Crs[Course]
     end
 
     subgraph Ternary ["Ternary"]
         direction TB
-        Phys[Physician] --- Prescribe{Prescribes}
-        Pat[Patient] --- Prescribe
-        Med[Medication] --- Prescribe
+        Inst[Instructor] --- Assign{Teaches}
+        Crs2[Course] --- Assign
+        Room[Classroom] --- Assign
     end
 ```
 
@@ -261,8 +267,8 @@ flowchart LR
 
 Participation constraints specify whether an entity instance must participate in a relationship:
 
-- **Total participation**: every instance of an entity must participate in the relationship, creating an existence dependency. In an ER diagram, double lines represent total participation. For example, every `OrderLineItem` must link to an existing `Order`.
-- **Partial participation**: some instances of an entity can exist without participating in the relationship. A single line represents partial participation. For example, an employee can exist without managing a department.
+- Total participation requires every instance of an entity to participate in the relationship, creating an existence dependency (represented by double lines in an ER diagram). For example, every `course_section` must link to an existing `course`.
+- Partial participation allows some instances of an entity to exist without participating in the relationship (represented by a single line). For example, an instructor can exist on research sabbatical without teaching an active course section.
 
 ### Crow's foot notation
 
@@ -279,10 +285,8 @@ Crow's foot notation uses visual symbols at relationship line endpoints to repre
 
 Enhanced Entity-Relationship (EER) modeling provides abstraction techniques for complex corporate hierarchies and entity specialization.
 
-### Generalization and specialization
-
-- **Generalization**: a bottom-up modeling process. It identifies shared attributes and behaviors across multiple specialized entities and unifies them into a generalized super-entity. For example, unifying `UndergraduateStudent` and `GraduateStudent` into `Student`.
-- **Specialization**: a top-down modeling process. It partitions a generalized entity into distinct sub-entities based on business conditions. For example, specializing an `Account` entity into `CheckingAccount` and `SavingsAccount`.
+- Generalization is a bottom-up modeling process that identifies shared attributes and behaviors across multiple specialized entities and unifies them into a generalized super-entity (such as unifying `UndergraduateStudent` and `GraduateStudent` into `Student`).
+- Specialization is a top-down modeling process that partitions a generalized entity into distinct sub-entities based on business conditions (such as specializing an `Account` entity into `CheckingAccount` and `SavingsAccount`).
 
 ```mermaid
 ---
@@ -307,19 +311,19 @@ In an EER hierarchy, specialized sub-entities inherit all attributes, primary ke
 
 Aggregation models a relationship between two entities as a higher-level entity set. This allows the relationship itself to establish associations with third entities without introducing messy ternary cross-products.
 
-For example, when an employee works on a project, that operational assignment can require specific technical hardware. Aggregation treats the `WorksOn` relationship between `Employee` and `Project` as a distinct unit, linking it directly to `HardwareEquipment`.
+For example, when a student enrolls in a specialized laboratory course section, that operational pairing can require dedicated lab equipment. Aggregation treats the `Enrollment` relationship between `Student` and `CourseSection` as a distinct unit, linking it directly to `LabEquipmentReservation`.
 
 ```mermaid
 ---
 title: Aggregation pattern
 ---
 flowchart LR
-    subgraph Assignment ["Aggregated Unit: WorksOn"]
+    subgraph Assignment ["Aggregated Unit: Enrollment"]
         direction LR
-        Employee[Employee] --- WorksOn{Works On} --- Project[Project]
+        Student[Student] --- Enrolls{Enrolls In} --- Section[CourseSection]
     end
 
-    Assignment --- Requires{Requires} --- Equipment[HardwareEquipment]
+    Assignment --- Requires{Requires} --- Equipment[LabEquipment]
 ```
 
 ## Real-world university enterprise schema
@@ -429,7 +433,7 @@ erDiagram
     }
 ```
 
-### Relationship mechanics breakdown
+### University schema relationships
 
 The enterprise model illustrates fundamental relational principles:
 
@@ -464,7 +468,7 @@ flowchart TD
 
     subgraph OLAP ["OLAP Dimensional Bridge Table (Analytical Fact Allocation)"]
         direction LR
-        F["FactBilling<br/>Metric: billed_amount<br/>FK: diagnosis_group_id"] --> B["BridgeDiagnosisGroup<br/>WeightingFactor: 0.60, 0.40"] --> D["DimDiagnosis<br/>Attribute: ICDCode"]
+        F["FactStudentResearch<br/>Metric: grant_amount<br/>FK: research_group_id"] --> B["BridgeResearchGroup<br/>WeightingFactor: 0.60, 0.40"] --> D["DimResearchDomain<br/>Attribute: DomainName"]
     end
 ```
 
@@ -474,36 +478,38 @@ In transactional databases, an associative junction table converts an unconstrai
 
 #### Structural characteristics
 
-- **Foreign key references**: contains foreign key columns referencing the primary keys of both participating tables.
-- **Composite primary key**: declares a composite primary key spanning both foreign keys, such as `PRIMARY KEY (student_id, course_id)`. The composite primary key prevents duplicate relationship pairings.
-- **Relationship attributes**: stores payload attributes that belong strictly to the association itself rather than either entity independently. Examples include `enrollment_date` and `final_grade` in a course enrollment table, or `salary` and `effective_date` in an employee role history table.
+A junction table has three core structural characteristics:
+
+- Foreign key references contain foreign key columns referencing the primary keys of both participating tables.
+- A composite primary key spans both foreign keys (such as `PRIMARY KEY (student_id, course_id)`), preventing duplicate relationship pairings.
+- Relationship payload attributes store values belonging strictly to the association itself rather than either entity independently (such as `enrollment_date` and `final_grade`).
 
 ### Dimensional bridge tables
 
-In analytical data warehouses following dimensional modeling practices, standard star schemas connect fact tables to single-valued dimensions. A fact table record contains foreign keys that resolve to one customer, one date, and one store.
+In analytical data warehouses following dimensional modeling practices, standard star schemas connect fact tables to single-valued dimensions. A fact table record contains foreign keys that resolve to one student, one date, and one course.
 
 However, real-world business events frequently associate with an open-ended collection of dimension values simultaneously:
 
-- A healthcare insurance claim links to multiple medical diagnoses.
-- A commercial bank account links to multiple joint account holders.
-- An insurance policy covers multiple drivers on a single vehicle.
+- A student research project links to two academic concentrations: artificial intelligence and robotics.
+- An interdisciplinary research grant distributes funds across multiple academic departments.
+- A university fellowship links to multiple faculty co-advisors.
 
 A dimensional bridge table, or helper table, bridges the gap between a single fact record and a multi-valued dimension.
 
 #### Weighting factors
 
-When an analytical query joins a fact table directly to a multi-valued dimension through an unweighted bridge table, the database replicates the fact row for every matching dimension member. Standard aggregates such as `SUM(billed_amount)` double-count revenue.
+When an analytical query joins a fact table directly to a multi-valued dimension through an unweighted bridge table, the database replicates the fact row for every matching dimension member. Standard aggregates such as `SUM(grant_amount)` double-count funding.
 
 To solve double-counting, bridge tables include a numerical weighting factor. A weighting factor is a fractional decimal between 0.01 and 1.00, where the weights for all members in a given group sum to 1.00.
 
 Weighting factors enable two distinct analytical reporting patterns:
 
-- **Correctly weighted reports**: the query multiplies the additive fact metric by the weighting factor: `SUM(fact_amount * weighting_factor)`. This distributes revenue or costs accurately across dimension members without double-counting.
-- **Impact analysis reports**: the query omits the weighting factor and aggregates the raw fact metric: `SUM(fact_amount)`. This reveals the total transaction volume touched by any specific dimension member.
+- Correctly weighted reports multiply the additive fact metric by the weighting factor: `SUM(fact_amount * weighting_factor)`, distributing grant funding or costs accurately across dimension members without double-counting.
+- Impact analysis reports omit the weighting factor and aggregate the raw fact metric: `SUM(fact_amount)`, revealing the total transaction volume touched by any specific dimension member.
 
 #### Ragged hierarchies
 
-Bridge tables also resolve ragged, variable-depth recursive hierarchies without requiring expensive recursive queries. Examples include corporate parent-subsidiary structures and manufacturing bills of materials.
+Bridge tables also resolve ragged, variable-depth recursive hierarchies without requiring expensive recursive queries. Examples include university departmental organization structures and curriculum prerequisite paths.
 
 A hierarchy bridge table stores one row for every ancestor-descendant pairing in the tree. Each row includes a depth indicator and a flag marking leaf nodes. Reporting queries join directly to the bridge table to aggregate entire sub-trees with standard filtering.
 
@@ -569,35 +575,35 @@ CREATE TABLE student_course_enrollments (
 -- Index reverse searches on the junction table
 CREATE INDEX idx_enrollments_course_id ON student_course_enrollments(course_id);
 
--- 5. DIMENSIONAL BRIDGE TABLE: Multi-valued diagnoses with weighting factors
-CREATE TABLE dim_diagnoses (
-    diagnosis_key   INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    icd_code        VARCHAR(20) NOT NULL UNIQUE,
-    description     VARCHAR(255) NOT NULL
+-- 5. DIMENSIONAL BRIDGE TABLE: Multi-valued research domains with weighting factors
+CREATE TABLE dim_research_domains (
+    domain_key  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    domain_code VARCHAR(20) NOT NULL UNIQUE,
+    domain_name VARCHAR(100) NOT NULL
 );
 
--- Bridge table connecting diagnosis groups to individual diagnoses
-CREATE TABLE bridge_diagnosis_group (
-    diagnosis_group_id INTEGER NOT NULL,
-    diagnosis_key      INTEGER NOT NULL,
-    weighting_factor   NUMERIC(3, 2) NOT NULL CHECK (weighting_factor > 0.00 AND weighting_factor <= 1.00),
-    PRIMARY KEY (diagnosis_group_id, diagnosis_key),
-    CONSTRAINT fk_bridge_diagnosis
-        FOREIGN KEY (diagnosis_key)
-        REFERENCES dim_diagnoses (diagnosis_key)
+-- Bridge table connecting research groups to individual domains
+CREATE TABLE bridge_research_group (
+    research_group_id INTEGER NOT NULL,
+    domain_key        INTEGER NOT NULL,
+    weighting_factor  NUMERIC(3, 2) NOT NULL CHECK (weighting_factor > 0.00 AND weighting_factor <= 1.00),
+    PRIMARY KEY (research_group_id, domain_key),
+    CONSTRAINT fk_bridge_research_domain
+        FOREIGN KEY (domain_key)
+        REFERENCES dim_research_domains (domain_key)
 );
 
-CREATE INDEX idx_bridge_diagnosis_key ON bridge_diagnosis_group(diagnosis_key);
+CREATE INDEX idx_bridge_domain_key ON bridge_research_group(domain_key);
 
--- Fact table referencing diagnosis_group_id
-CREATE TABLE fact_billing (
-    billing_id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    patient_id         INTEGER NOT NULL,
-    diagnosis_group_id INTEGER NOT NULL, -- References the multi-valued bridge group
-    billed_amount      NUMERIC(10, 2) NOT NULL CHECK (billed_amount >= 0.00)
+-- Fact table referencing research_group_id
+CREATE TABLE fact_student_research (
+    project_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    student_key       INTEGER NOT NULL,
+    research_group_id INTEGER NOT NULL, -- References the multi-valued bridge group
+    grant_amount      NUMERIC(10, 2) NOT NULL CHECK (grant_amount >= 0.00)
 );
 
-CREATE INDEX idx_fact_billing_group_id ON fact_billing(diagnosis_group_id);
+CREATE INDEX idx_fact_research_group_id ON fact_student_research(research_group_id);
 ```
 
 ### Analytical reporting query
@@ -606,16 +612,16 @@ The following SQL statement demonstrates how weighting factors prevent double-co
 
 ```sql
 SELECT 
-    d.description AS diagnosis_description,
-    -- Correctly weighted revenue: prevents double-counting across multi-valued diagnoses
-    SUM(f.billed_amount * b.weighting_factor) AS weighted_revenue,
-    -- Full impact revenue: shows total transaction volume touched by each diagnosis
-    SUM(f.billed_amount)                      AS total_impact_volume
-FROM fact_billing f
-JOIN bridge_diagnosis_group b ON f.diagnosis_group_id = b.diagnosis_group_id
-JOIN dim_diagnoses d         ON b.diagnosis_key = d.diagnosis_key
-GROUP BY d.description
-ORDER BY weighted_revenue DESC;
+    d.domain_name,
+    -- Correctly weighted funding: prevents double-counting across multi-valued domains
+    SUM(f.grant_amount * b.weighting_factor) AS weighted_grant_funding,
+    -- Full impact funding: shows total grant volume touched by each domain
+    SUM(f.grant_amount)                      AS total_impact_volume
+FROM fact_student_research f
+JOIN bridge_research_group b ON f.research_group_id = b.research_group_id
+JOIN dim_research_domains d  ON b.domain_key = d.domain_key
+GROUP BY d.domain_name
+ORDER BY weighted_grant_funding DESC;
 ```
 
 ## Common design pitfalls
@@ -630,44 +636,42 @@ For example, if 5 records on the left table match 10 records on the right table 
 
 Joining an analytical fact table to a multi-valued dimension through a bridge table replicates fact records for each associated dimension member.
 
-Running a basic `SUM(billed_amount)` without incorporating `weighting_factor` counts each invoice multiple times. When designing bridge tables, analysts must either multiply additive facts by the weighting factor or aggregate metrics in an isolated Common Table Expression (CTE) query before joining the bridge table.
+Running a basic `SUM(grant_amount)` without incorporating `weighting_factor` counts each grant multiple times. When designing bridge tables, analysts must either multiply additive facts by the weighting factor or aggregate metrics in an isolated Common Table Expression (CTE) query before joining the bridge table.
 
 ### The fan trap and chasm trap
 
-The fan trap and chasm trap represent classic join path anomalies in database modeling:
+- The fan trap occurs when a query joins two "Many" child tables along a single relational path where the master table joins to child A, which then joins to child B. Aggregating across the path produces inflated sums because rows in child A multiply against matching rows in child B.
+- The chasm trap occurs when a query joins two independent "Many" child tables through a shared "One" parent dimension (such as querying `student_tuition_payments` and `student_course_grades` simultaneously through `students`). The relational engine produces a Cartesian product between payments and course enrollments for each student, corrupting numeric aggregations.
 
-- **The fan trap**: occurs when a query joins two "Many" child tables along a single relational path where the master table joins to child A, which then joins to child B. Aggregating across the path produces inflated sums because rows in child A multiply against matching rows in child B.
-- **The chasm trap**: occurs when a query joins two independent "Many" child tables through a shared "One" parent dimension. For example, querying `customer_orders` and `customer_payments` simultaneously through `dim_customer`. The relational engine produces a Cartesian product between orders and payments for each customer, corrupting numeric aggregations.
-
-#### Resolving the chasm trap with multi-pass queries
+#### Resolve the chasm trap with multi-pass queries
 
 To resolve the chasm trap, execute multi-pass SQL. Aggregate each child relationship independently inside separate Common Table Expression (CTE) queries, and merge the summarized results using a `FULL OUTER JOIN` on the common dimension key:
 
 ```sql
-WITH order_summary AS (
+WITH payment_summary AS (
     SELECT 
-        customer_id,
-        COUNT(order_id)         AS total_orders,
-        SUM(total_order_amount) AS total_order_spend
-    FROM orders
-    GROUP BY customer_id
-),
-payment_summary AS (
-    SELECT 
-        customer_id,
+        student_id,
         COUNT(payment_id)   AS total_payments,
-        SUM(payment_amount) AS total_paid
-    FROM payments
-    GROUP BY customer_id
+        SUM(tuition_amount) AS total_paid
+    FROM student_tuition_payments
+    GROUP BY student_id
+),
+grade_summary AS (
+    SELECT 
+        student_id,
+        COUNT(enrollment_id) AS total_courses,
+        AVG(grade_points)    AS cumulative_gpa
+    FROM student_course_grades
+    GROUP BY student_id
 )
 SELECT 
-    COALESCE(o.customer_id, p.customer_id) AS customer_id,
-    COALESCE(o.total_orders, 0)            AS total_orders,
-    COALESCE(o.total_order_spend, 0.00)    AS total_order_spend,
-    COALESCE(p.total_payments, 0)          AS total_payments,
-    COALESCE(p.total_paid, 0.00)           AS total_paid
-FROM order_summary o
-FULL OUTER JOIN payment_summary p ON o.customer_id = p.customer_id;
+    COALESCE(p.student_id, g.student_id)       AS student_id,
+    COALESCE(p.total_payments, 0)              AS total_payments,
+    COALESCE(p.total_paid, 0.00)               AS total_paid,
+    COALESCE(g.total_courses, 0)               AS total_courses,
+    ROUND(COALESCE(g.cumulative_gpa, 0.00), 2) AS cumulative_gpa
+FROM payment_summary p
+FULL OUTER JOIN grade_summary g ON p.student_id = g.student_id;
 ```
 
 ### Missing indexes on junction table foreign keys
@@ -691,3 +695,12 @@ For strictly hierarchical, self-contained objects, such as a user profile contai
 - Create explicit secondary indexes on the second column of junction tables to support efficient reverse searches.
 - Implement dimensional bridge tables with weighting factors to prevent double-counting across multi-valued dimensions.
 - Use multi-pass CTE queries to prevent Cartesian row multiplication in fan traps and chasm traps.
+
+## What's next
+
+- Master anomalies, functional dependencies, and normal forms in
+  [Database normalization](/modeling/database-normalization).
+- Explore star schemas and enterprise bus matrices in
+  [Dimensional modeling methodology](/modeling/dimensional-modeling-methodology).
+- Master relational join execution and anti-semi-joins in
+  [Fundamental joins](/sql/fundamental-joins).

@@ -17,13 +17,13 @@ hero:
 # features:
 #   - icon: github
 #     title: SQL & Database Engines
-#     details: Deep dive into query execution mechanics, B-Trees, page storage, joins, and window functions.
+#     details: Explore query execution plans, B-trees, page storage, joins, and window functions.
 #   - icon: 🚀
 #     title: Spark & Distributed Computing
 #     details: Master Catalyst optimizer internals, Tungsten binary execution, partitioning, and memory tuning.
 #   - icon: 🔄
 #     title: Pipelines & Event Streaming
-#     details: Modern Medallion architectures, Airflow DAG orchestration, and Kafka event streaming mechanics.
+#     details: Modern Medallion architectures, Airflow DAG orchestration, and Kafka event streaming architectures.
 #   - icon: 🛠️
 #     title: Systems & Data Structures
 #     details: Algorithmic efficiency, sliding window patterns, graph traversals, and distributed system trade-offs.

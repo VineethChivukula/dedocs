@@ -1,515 +1,336 @@
 # Dimensional modeling methodology
 
-## Overview
-
-Data warehousing architectures separate operational transaction processing,
-or OLTP, from analytical querying, or OLAP. Running complex aggregations and
-historical analyses directly against transactional production databases
-degrades app throughput, causes lock contention, and slows response times.
+Analytical data architectures separate Online Transaction Processing (OLTP)
+systems from Online Analytical Processing (OLAP) environments. Running complex
+aggregations and multi-year queries directly against operational production
+databases degrades transaction throughput, introduces lock contention, and
+slows user response times.
 
 Two foundational methodologies historically shaped analytical data
-architecture:
+warehousing:
 
-1. **Bill Inmon's Enterprise Data Warehouse (EDW)**: a top-down, centralized
-   approach centering on a normalized third normal form, or 3NF, relational core.
-2. **Ralph Kimball's Dimensional Modeling**: an iterative, bottom-up
+1. **Bill `Inmon's` Enterprise Data Warehouse (EDW)**: a top-down, centralized
+   approach centered on a normalized Third Normal Form relational core.
+2. **Ralph `Kimball`'s Dimensional Modeling**: an iterative, bottom-up
    approach organizing analytical data around business processes, conformed
    dimensions, and star schemas.
 
-This guide provides a comprehensive technical reference for both
-methodologies. It details their core philosophies, architectural data flows,
-relational schemas, conformed bus mechanics, step-by-step multi-pass
-drill-across queries, operational failure modes, and modern lakehouse
-convergence patterns.
+Understanding both approaches helps you evaluate trade-offs between centralized
+normalization and dimensional accessibility in modern data platforms.
 
-## Inmon enterprise data warehouse top-down methodology
+## When to use each methodology
 
-Formulated in 1990 by Bill Inmon, this methodology approaches analytical data
-from an enterprise-wide perspective. Inmon defines a data warehouse as a
-subject-oriented, integrated, non-volatile, and time-variant collection of
-data in support of management decisions.
+Use the following decision matrix to compare analytical modeling
+methodologies:
 
-```mermaid
----
-title: Inmon top-down architecture
----
-flowchart TD
-    subgraph Sources ["Operational Source Systems"]
-        direction LR
-        S1["ERP Database"]
-        S2["CRM System"]
-        S3["Billing System"]
-    end
+| Methodology | Primary scenario | Core design | Integration mechanism | Architectural trade-off |
+| :--- | :--- | :--- | :--- | :--- |
+| **Bill `Inmon` top-down model** | Large enterprises with centralized data governance teams | Normalized 3NF central warehouse feeding departmental marts | Enterprise-wide normalized entity-relationship model | High upfront modeling time and two-stage pipeline overhead |
+| **Ralph `Kimball` dimensional bus** | Fast-moving organizations needing iterative business value | Dimensional star schemas organized around business processes | Conformed dimensions and standardized facts across an enterprise bus matrix | Requires disciplined governance to avoid stovepipe data marts |
+| **Modern `` `lakehouse` `` pattern** | Modern platforms using tools such as `` `dbt` `` and `BigQuery` | Normalized staging tables feeding star schemas in the presentation layer | Common data models and transformation pipelines | Requires maintaining multi-layer storage and transformation infrastructure |
 
-    ETL1["Stage 1 ETL: Cleanse, Standardize, and Normalize"]
+## `Inmon` top-down enterprise warehouse methodology
 
-    subgraph EDW ["Enterprise Data Warehouse Core"]
-        Core3NF["Central Relational Warehouse<br/>Third Normal Form 3NF<br/>Granular Single Source of Truth"]
-    end
+Formulated in 1990 by Bill `Inmon`, this methodology approaches analytical data
+from an enterprise-wide perspective. `Inmon` defines a data warehouse using
+four core criteria:
 
-    ETL2["Stage 2 ETL: Extract, Restructure, and Summarize"]
+- Subject-oriented: data organizes around major business subjects, such as
+  students, faculty, and academic programs, rather than operational software
+  features.
+- Integrated: the warehouse unifies inconsistent data formats, codes, and
+  keys across multiple operational source systems into an enterprise standard.
+- Non-volatile: once written, the engine preserves historical data without
+  in-place modifications or row mutations.
+- Time-variant: every record includes explicit temporal attributes, such as
+  effective dates or term keys, to track historical states.
 
-    subgraph Marts ["Departmental Data Marts"]
-        direction LR
-        M1["Sales Mart<br/>Star Schema"]
-        M2["Marketing Mart<br/>Aggregated Tables"]
-        M3["Finance Mart<br/>Dimensional Cubes"]
-    end
+### Two-stage pipeline architecture
 
-    BI["Business Intelligence, Dashboards, and Ad-Hoc Analytics"]
+`Inmon` structures data movement through two distinct layers:
 
-    Sources --> ETL1
-    ETL1 --> Core3NF
-    Core3NF --> ETL2
-    ETL2 --> Marts
-    Marts --> BI
-```
+1. **Sources to central 3NF warehouse**: data pipelines extract raw
+   transactional records from operational source systems, standardize formats,
+   and load them into a normalized 3NF central repository. This database serves
+   as the enterprise single source of truth.
+2. **Central 3NF warehouse to departmental data marts**: business analysts
+   don't query the normalized 3NF core directly. Instead, secondary pipelines
+   extract data from the 3NF warehouse to populate dedicated departmental data
+   marts. These marts use star schemas or pre-aggregated tables tailored to
+   specific business units, such as admissions, or financial aid.
 
-### Core architectural characteristics
+## `Kimball` dimensional modeling and bus architecture
 
-- **Subject-oriented**: data focuses on major business entities such as
-  customers, products, and parts, rather than app features.
-- **Integrated**: the central warehouse unifies inconsistent data across
-  multiple operational source systems into a single enterprise standard. Inmon
-  considers integration the most critical requirement of a warehouse.
-- **Non-volatile**: once written, the engine preserves historical data without
-  in-place updates or row mutations.
-- **Time-variant**: every table includes explicit temporal attributes, such as
-  snapshot dates or effective intervals, to record historical changes.
-
-### Two-stage pipeline mechanics
-
-Inmon structures data movement through two separate pipeline layers:
-
-1. **Stage 1 - sources to central 3NF EDW**: raw transactional records are
-   extracted, cleansed, validated, and normalized into a centralized 3NF
-   database. This database serves as the enterprise single source of truth.
-2. **Stage 2 - central 3NF EDW to departmental data marts**: business
-   analysts don't query the normalized 3NF core directly. Instead, secondary
-   pipelines extract data from the 3NF warehouse to populate dedicated
-   departmental data marts. These marts use denormalized star schemas or
-   pre-aggregated summary tables tailored to specific business units.
-
-## Kimball dimensional modeling and bus architecture
-
-Developed by Ralph Kimball and Margy Ross, dimensional modeling is an
+Developed by Ralph `Kimball` and `Margy Ross`, dimensional modeling is an
 iterative, business-process-driven methodology designed around query
 simplicity, fast analytical performance, and intuitive business navigation.
 
-```mermaid
----
-title: Kimball dimensional bus architecture
----
-flowchart TD
-    subgraph Sources ["Operational Source Systems"]
-        direction LR
-        K1["Web Store POS"]
-        K2["Warehouse Inventory"]
-        K3["Logistics System"]
-    end
+### Core principles
 
-    ETL["Backroom ETL Staging Area<br/>Cleansing, Conforming, Surrogate Keys"]
+`Kimball` dimensional modeling follows four foundational principles:
 
-    subgraph BusMatrix ["Data Warehouse Presentation Layer: Enterprise Bus Matrix"]
-        direction TB
-
-        subgraph Dimensions ["Conformed Dimensions"]
-            direction LR
-            DDate["dim_date"]
-            DProd["dim_product"]
-            DCust["dim_customer"]
-        end
-
-        subgraph Facts ["Business Process Fact Tables"]
-            direction LR
-            F1["fact_retail_sales<br/>Atomic POS Transactions"]
-            F2["fact_inventory_snapshot<br/>Periodic Daily Snapshots"]
-            F3["fact_shipments<br/>Accumulating Milestones"]
-        end
-
-        DDate -.-> F1
-        DDate -.-> F2
-        DDate -.-> F3
-        DProd -.-> F1
-        DProd -.-> F2
-        DCust -.-> F1
-        DCust -.-> F3
-    end
-
-    Analytics["Multi-Pass SQL Queries, Business Dashboards, and Drill-Across Tools"]
-
-    Sources --> ETL
-    ETL --> BusMatrix
-    BusMatrix --> Analytics
-```
-
-### Core philosophical principles
-
-- **Model business events**: the presentation area directly mirrors
-  operational measurements rather than entity relationship graphs.
-- **Atomic grain first**: fact tables must record data at the lowest possible
-  physical grain, such as individual retail receipt lines. Atomic detail
-  ensures the warehouse can answer unanticipated ad-hoc questions without
-  requiring new pipeline transformations.
-- **No normalized presentation layer**: Kimball prohibits normalized 3NF
-  schemas in the user-facing presentation area. Multi-table 3NF joins
-  confuse business analysts and overwhelm database join optimizers.
-- **Dimensional navigation**: queries slice numeric measurements by intuitive
-  business dimensions answering who, what, where, when, and why.
+- The presentation area models business events directly from operational
+  measurements, such as course registrations, rather than entity-relationship
+  diagrams.
+- Fact tables store records at atomic grain (the lowest physical grain captured
+  by operational systems, such as an individual course registration line). Atomic
+  detail allows the warehouse to answer unexpected questions without requiring
+  new pipeline modifications.
+- The presentation layer avoids normalized 3NF schemas. Multi-table 3NF joins
+  confuse analysts and overwhelm database join optimizers.
+- Queries navigate dimensions to slice numeric measurements by intuitive
+  business dimensions answering who, what, where, and when.
 
 ### Enterprise bus architecture and conformed dimensions
 
-Rather than attempting to model the entire enterprise upfront, Kimball builds
-modular, business-process-specific data marts linked by the enterprise data
+Rather than attempting to model the entire enterprise upfront, `Kimball` builds
+modular, business-process-specific data marts linked by an enterprise data
 warehouse bus architecture:
 
-- **Business processes instead of departments**: pipelines map to business
-  activities such as retail sales, invoicing, and inventory storage, rather
-  than organizational units such as the marketing department.
-- **Conformed dimensions**: dimension tables shared across multiple business
-  processes use identical surrogate keys, column names, definitions, and domain
-  values. For example, `dim_product` serves both retail sales and warehouse
-  inventory.
-- **Conformed facts**: numeric measures, such as gross profit or net revenue,
-  maintain identical mathematical formulas and dimensional granularity across
-  separate fact tables.
-- **Drill-across capability**: because teams conform dimensions across the
-  enterprise, separate queries calculate summary facts independently and
-  combine results using an outer join on shared dimension attributes.
+```mermaid
+flowchart TD
+    subgraph Dimensions["Conformed Dimensions (Shared Bus)"]
+        D1["dim_term"]
+        D2["dim_course"]
+        D3["dim_department"]
+    end
 
-## Methodology comparison matrix
+    subgraph Facts["Independent Business Process Facts"]
+        F1["fact_course_enrollment<br/>(Student Registrations)"]
+        F2["fact_section_capacity<br/>(Classroom Offerings)"]
+        F3["fact_tuition_line_item<br/>(Student Billing)"]
+    end
 
-| Architectural Dimension | Bill Inmon - Top-Down EDW | Ralph Kimball - Dimensional Bus |
-| :--- | :--- | :--- |
-| Primary philosophy | Enterprise-first and centralized | Business-process-first and iterative |
-| Core warehouse model | Highly normalized 3NF relational schema | Dimensional star schemas on a bus matrix |
-| Presentation layer | Downstream departmental data marts | Star schemas in the presentation area |
-| Data redundancy | Strictly minimized in the central 3NF core | Controlled redundancy in dimension tables |
-| Pipeline complexity | High: two-stage ETL pipeline | Moderate: single staging to star pipeline |
-| Initial time to value | Slower: requires broad upfront enterprise modeling | Faster: delivers value through discrete business processes |
-| Integration mechanism | Enforced at the central normalized schema | Enforced through conformed dimensions and facts |
-| Analytical query model | Star joins in marts or complex joins in 3NF | Star joins with selective dimension constraints |
+    D1 -.-> F1
+    D1 -.-> F2
+    D1 -.-> F3
+    
+    D2 -.-> F1
+    D2 -.-> F2
+    D2 -.-> F3
 
-## Concrete implementation: e-commerce case study
-
-To contrast how both methodologies structure analytical databases, consider
-an online retail business tracking customer orders, product catalogs, and
-warehouse inventory.
-
-### Approach A - Inmon normalized schema with downstream mart
-
-In Inmon's methodology, operational data first populates an enterprise-wide,
-normalized 3NF relational schema.
-
-#### Central normalized 3NF enterprise warehouse
-
-```sql
--- Category master relation
-CREATE TABLE edw_categories (
-  category_id   INTEGER PRIMARY KEY,
-  category_name VARCHAR(50) NOT NULL
-);
-
--- Supplier master relation
-CREATE TABLE edw_suppliers (
-  supplier_id   INTEGER PRIMARY KEY,
-  supplier_name VARCHAR(100) NOT NULL,
-  country_code  VARCHAR(3) NOT NULL
-);
-
--- Normalized product entity
-CREATE TABLE edw_products (
-  product_id    INTEGER PRIMARY KEY,
-  sku           VARCHAR(20) NOT NULL UNIQUE,
-  product_name  VARCHAR(100) NOT NULL,
-  category_id   INTEGER NOT NULL REFERENCES edw_categories(category_id),
-  supplier_id   INTEGER NOT NULL REFERENCES edw_suppliers(supplier_id)
-);
-
--- Customer entity
-CREATE TABLE edw_customers (
-  customer_id     INTEGER PRIMARY KEY,
-  email           VARCHAR(100) NOT NULL UNIQUE,
-  first_name      VARCHAR(50) NOT NULL,
-  last_name       VARCHAR(50) NOT NULL,
-  registration_dt TIMESTAMP NOT NULL
-);
-
--- Order header relation
-CREATE TABLE edw_orders (
-  order_id        BIGINT PRIMARY KEY,
-  customer_id     INTEGER NOT NULL REFERENCES edw_customers(customer_id),
-  order_date      DATE NOT NULL,
-  order_status    VARCHAR(20) NOT NULL
-);
-
--- Order line items relation (associative entity)
-CREATE TABLE edw_order_line_items (
-  order_id        BIGINT NOT NULL REFERENCES edw_orders(order_id),
-  product_id      INTEGER NOT NULL REFERENCES edw_products(product_id),
-  quantity        INTEGER NOT NULL,
-  unit_price      NUMERIC(10, 2) NOT NULL,
-  discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-  PRIMARY KEY (order_id, product_id)
-);
+    D3 -.-> F1
+    D3 -.-> F2
+    D3 -.-> F3
 ```
 
-#### Downstream marketing data mart: star schema
+The enterprise data warehouse bus architecture relies on several core concepts:
 
-A secondary pipeline extracts, denormalizes, and loads data from the 3NF core
-into a dimensional sales mart:
-
-```sql
--- Denormalized dimension table for marketing analysis
-CREATE TABLE dm_marketing_product (
-  product_key   INTEGER PRIMARY KEY,
-  sku           VARCHAR(20) NOT NULL,
-  product_name  VARCHAR(100) NOT NULL,
-  category_name VARCHAR(50) NOT NULL,
-  supplier_name VARCHAR(100) NOT NULL
-);
-
--- Marketing sales fact table
-CREATE TABLE dm_marketing_sales_fact (
-  order_date_key INTEGER NOT NULL,
-  customer_key   INTEGER NOT NULL,
-  product_key    INTEGER NOT NULL REFERENCES dm_marketing_product(product_key),
-  total_sales    NUMERIC(10, 2) NOT NULL,
-  total_units    INTEGER NOT NULL
-);
-```
-
-### Approach B - Kimball bus architecture with conformed dimensions
-
-In Kimball's methodology, the ETL staging pipeline directly builds conformed
-dimensions and atomic star schemas.
-
-#### Conformed dimension tables
-
-```sql
--- Conformed date dimension shared across all business processes
-CREATE TABLE dim_date (
-  date_key        INTEGER PRIMARY KEY, -- Format: YYYYMMDD
-  calendar_date   DATE NOT NULL UNIQUE,
-  day_of_week     VARCHAR(10) NOT NULL,
-  month_name      VARCHAR(15) NOT NULL,
-  calendar_year   INTEGER NOT NULL,
-  is_weekend_flag BOOLEAN NOT NULL
-);
-
--- Conformed product dimension denormalized across categories and suppliers
-CREATE TABLE dim_product (
-  product_key   INTEGER PRIMARY KEY, -- Surrogate key
-  sku_number    VARCHAR(20) NOT NULL, -- Natural key
-  product_name  VARCHAR(100) NOT NULL,
-  brand_name    VARCHAR(50) NOT NULL,
-  category_name VARCHAR(50) NOT NULL,
-  supplier_name VARCHAR(100) NOT NULL
-);
-
--- Conformed customer dimension
-CREATE TABLE dim_customer (
-  customer_key   INTEGER PRIMARY KEY, -- Surrogate key
-  customer_id    INTEGER NOT NULL,    -- Natural key
-  full_name      VARCHAR(100) NOT NULL,
-  email          VARCHAR(100) NOT NULL,
-  city           VARCHAR(50) NOT NULL,
-  state_province VARCHAR(50) NOT NULL
-);
-```
-
-#### Business process 1: retail sales transaction fact
-
-```sql
-CREATE TABLE fact_retail_sales (
-  date_key        INTEGER NOT NULL REFERENCES dim_date(date_key),
-  product_key     INTEGER NOT NULL REFERENCES dim_product(product_key),
-  customer_key    INTEGER NOT NULL REFERENCES dim_customer(customer_key),
-  order_number_dd VARCHAR(20) NOT NULL, -- Degenerate dimension
-
-  -- Additive numerical facts
-  sales_quantity  INTEGER NOT NULL,
-  gross_sales_amt NUMERIC(10, 2) NOT NULL,
-  discount_amt    NUMERIC(10, 2) NOT NULL,
-  net_sales_amt   NUMERIC(10, 2) NOT NULL
-);
-```
-
-#### Business process 2: warehouse inventory snapshot fact
-
-Notice that `fact_inventory_snapshot` shares the identical conformed
-`dim_date` and `dim_product` tables from the bus matrix:
-
-```sql
-CREATE TABLE fact_inventory_snapshot (
-  date_key          INTEGER NOT NULL REFERENCES dim_date(date_key),
-  product_key       INTEGER NOT NULL REFERENCES dim_product(product_key),
-  warehouse_key     INTEGER NOT NULL,
-
-  -- Semi-additive facts
-  quantity_on_hand  INTEGER NOT NULL,
-  inventory_val_amt NUMERIC(12, 2) NOT NULL
-);
-```
+- Pipelines map to operational activities and business processes, such as course
+  registration or tuition billing, rather than organizational silos.
+- Dimension tables shared across multiple business processes use identical surrogate
+  keys, column names, and definitions (conformed dimensions). For example,
+  `dim_course` serves both course registration analysis and classroom capacity
+  planning.
+- Numeric measures, such as enrolled units or tuition fees, maintain identical
+  mathematical definitions and units of measurement across separate fact tables
+  (conformed facts).
+- Conformed dimensions enable drill-across querying: queries calculate summary
+  metrics from separate fact tables independently and combine results using an
+  outer join on shared dimension attributes.
 
 ## Multi-pass drill-across query execution
 
-Because teams conform `dim_product` across business processes, queries can
-extract metrics from both retail sales and warehouse inventory independently,
-then join the summarized datasets on the shared category attribute.
+A central strength of the `Kimball` bus architecture is drill-across querying.
+When university administrators want to compare total student enrolled units
+against scheduled classroom seating capacity across academic departments,
+querying both fact tables in a single SQL statement requires a multi-pass
+technique.
 
-### Sample data states
+### The chasm trap in single-pass joins
 
-#### `dim_product` rows
+Joining two fact tables directly on a shared dimension in a single query pass
+causes a chasm trap. Because multiple enrollment rows and multiple course
+section rows match a single course record, the relational join multiplies rows
+between both facts. This Cartesian fan-out produces severely inflated metric
+totals.
 
-| `product_key` | `sku_number` | `product_name` | `category_name` |
-| :--- | :--- | :--- | :--- |
-| `1` | `SKU-LAPTOP` | UltraBook Pro | Electronics |
-| `2` | `SKU-DESK` | Standing Desk | Furniture |
-| `3` | `SKU-CHAIR` | Ergonomic Chair | Furniture |
-
-#### `fact_retail_sales` records for calendar year 2026
-
-| `product_key` | `net_sales_amt` |
-| :--- | :--- |
-| `1` - Electronics | `45000.00` |
-| `2` - Furniture | `15000.00` |
-| `3` - Furniture | `12000.00` |
-
-#### `fact_inventory_snapshot` records as of 2026-10-01
-
-| `product_key` | `quantity_on_hand` |
-| :--- | :--- |
-| `1` - Electronics | `85` |
-| `2` - Furniture | `140` |
-| `3` - Furniture | `60` |
-
-### Multi-pass query execution
+To avoid metric inflation, execute a multi-pass query using Common Table
+Expressions, known as `` `CTEs` ``. Each query block aggregates its respective fact
+table down to the shared dimension grain before joining the summarized results:
 
 ```sql
-WITH SalesSummary AS (
-  SELECT
-    p.category_name,
-    SUM(s.net_sales_amt) AS total_sales_usd
-  FROM fact_retail_sales AS s
-  INNER JOIN dim_product AS p
-    ON s.product_key = p.product_key
-  INNER JOIN dim_date AS d
-    ON s.date_key = d.date_key
-  WHERE d.calendar_year = 2026
-  GROUP BY p.category_name
+WITH EnrollmentSummary AS (
+    -- First pass: aggregate student enrollments by department
+    SELECT 
+        c.department_key,
+        SUM(e.enrollment_count) AS total_enrolled_students,
+        SUM(e.enrolled_units)   AS total_enrolled_units
+    FROM fact_course_enrollment AS e
+    JOIN dim_course AS c
+        ON e.course_key = c.course_key
+    WHERE e.term_key = 202601 -- Autumn 2026
+    GROUP BY c.department_key
 ),
-InventorySummary AS (
-  SELECT
-    p.category_name,
-    SUM(i.quantity_on_hand) AS total_units_in_stock
-  FROM fact_inventory_snapshot AS i
-  INNER JOIN dim_product AS p
-    ON i.product_key = p.product_key
-  INNER JOIN dim_date AS d
-    ON i.date_key = d.date_key
-  WHERE d.calendar_date = '2026-10-01'
-  GROUP BY p.category_name
+CapacitySummary AS (
+    -- Second pass: aggregate scheduled classroom capacity by department
+    SELECT 
+        c.department_key,
+        COUNT(s.section_key)      AS total_sections_offered,
+        SUM(s.seating_capacity)   AS total_seating_capacity
+    FROM fact_section_capacity AS s
+    JOIN dim_course AS c
+        ON s.course_key = c.course_key
+    WHERE s.term_key = 202601 -- Autumn 2026
+    GROUP BY c.department_key
 )
-SELECT
-  COALESCE(s.category_name, i.category_name) AS product_category,
-  s.total_sales_usd,
-  i.total_units_in_stock
-FROM SalesSummary AS s
-FULL OUTER JOIN InventorySummary AS i
-  ON s.category_name = i.category_name
-ORDER BY product_category;
+-- Third pass: combine independent aggregates using a full outer join
+SELECT 
+    d.department_name,
+    COALESCE(e.total_enrolled_students, 0) AS enrolled_students,
+    COALESCE(e.total_enrolled_units, 0)    AS enrolled_units,
+    COALESCE(c.total_sections_offered, 0)  AS sections_offered,
+    COALESCE(c.total_seating_capacity, 0)  AS seating_capacity
+FROM dim_department AS d
+LEFT JOIN EnrollmentSummary AS e
+    ON d.department_key = e.department_key
+LEFT JOIN CapacitySummary AS c
+    ON d.department_key = c.department_key
+WHERE e.total_enrolled_students IS NOT NULL 
+   OR c.total_sections_offered IS NOT NULL
+ORDER BY enrolled_students DESC;
 ```
 
-### Resultant output table
+## Schema implementation for the university scenario
 
-| `product_category` | `total_sales_usd` | `total_units_in_stock` |
-| :--- | :--- | :--- |
-| Electronics | `45000.00` | `85` |
-| Furniture | `27000.00` | `200` |
+The following schemas contrast an `Inmon` 3NF normalized structure with a
+`Kimball` conformed dimensional model for university course operations.
 
-Multi-pass querying avoids row multiplication errors. Slicing independent
-business processes at a common conformed grain preserves exact aggregations.
+### Normalized relational enterprise schema
 
-## Common pitfalls and failure modes
+```sql
+-- Inmon 3NF: Department master relation
+CREATE TABLE edw_departments (
+    department_id   INT PRIMARY KEY,
+    department_code VARCHAR(10) NOT NULL UNIQUE,
+    department_name VARCHAR(100) NOT NULL,
+    school_name     VARCHAR(100) NOT NULL
+);
 
-### Kimball failure modes
+-- Inmon 3NF: Course master relation
+CREATE TABLE edw_courses (
+    course_id       INT PRIMARY KEY,
+    course_code     VARCHAR(20) NOT NULL UNIQUE,
+    course_title    VARCHAR(100) NOT NULL,
+    department_id   INT NOT NULL REFERENCES edw_departments(department_id),
+    unit_credits    INT NOT NULL
+);
 
-- **The stovepipe data mart trap**: if teams build departmental dimensional
-  marts without strictly conforming dimension keys and column definitions, the
-  architecture degenerates into disconnected silos that produce conflicting
-  business metrics.
-- **Enterprise governance contention**: agreeing on consistent enterprise
-  definitions, such as defining an active customer or product line, requires
-  substantial cross-functional collaboration.
-- **Streaming latency**: dimensional models assume batch ETL processing.
-  Real-time streaming ingestion with high-frequency Type-2 slowly changing
-  dimension updates strains warehouse storage engines.
+-- Inmon 3NF: Student master relation
+CREATE TABLE edw_students (
+    student_id      INT PRIMARY KEY,
+    first_name      VARCHAR(50) NOT NULL,
+    last_name       VARCHAR(50) NOT NULL,
+    email           VARCHAR(100) NOT NULL UNIQUE,
+    entry_year      INT NOT NULL
+);
 
-### Inmon failure modes
-
-- **Analysis paralysis**: designing an enterprise-wide normalized 3NF data
-  model upfront requires months or years of design review, delaying initial
-  time to value.
-- **Double ETL overhead**: transforming data twice—from sources to 3NF, and
-  from 3NF to data marts—demands additional engineering effort, compute
-  resources, and pipeline orchestration.
-- **Rigid schema modification**: modifying centralized 3NF relations to
-  support changing product features requires extensive enterprise reviews,
-  slowing development velocity.
-
-## Modern industry convergence: lakehouse and medallion architecture
-
-Modern cloud data platforms, such as Snowflake, BigQuery, and Databricks,
-rarely implement either methodology in its purest historical form. Instead,
-modern architectures combine both approaches within a layered medallion
-framework:
-
-```mermaid
----
-title: Medallion lakehouse convergence
----
-flowchart LR
-    subgraph Raw ["Bronze Layer"]
-        B1["Raw Append Logs<br/>Parquet / Iceberg / Delta<br/>Source System Fidelity"]
-    end
-
-    subgraph Staged ["Silver Layer: Inmon Influence"]
-        S1["Cleaned, Validated Data<br/>Normalized 3NF or Data Vault<br/>Enterprise Deduplication"]
-    end
-
-    subgraph Serving ["Gold Layer: Kimball Influence"]
-        G1["Dimensional Star Schemas<br/>Conformed Bus Dimensions<br/>Business Process Fact Tables"]
-    end
-
-    Tools["Transformations managed via dbt, SQLMesh, or Spark"]
-
-    Raw --> Tools
-    Tools --> Staged
-    Staged --> Tools
-    Tools --> Serving
+-- Inmon 3NF: Course enrollment associative relation
+CREATE TABLE edw_enrollments (
+    enrollment_id   BIGINT PRIMARY KEY,
+    student_id      INT NOT NULL REFERENCES edw_students(student_id),
+    course_id       INT NOT NULL REFERENCES edw_courses(course_id),
+    term_code       VARCHAR(10) NOT NULL,
+    enrollment_date DATE NOT NULL,
+    final_grade     VARCHAR(5),
+    grade_points    DECIMAL(3,2)
+);
 ```
 
-- **Bronze layer**: ingests raw event streams and change data capture logs
-  directly from operational systems.
-- **Silver layer: Inmon influence**: cleanses, validates, and stores data in a
-  normalized 3NF or Data Vault structure to establish an audited corporate
-  source of truth.
-- **Gold layer: Kimball influence**: transforms silver data into dimensional
-  star schemas using tools such as dbt, providing business analysts with fast,
-  intuitive presentation models.
+### `Kimball` conformed star schema
 
-## Key takeaways
+```sql
+-- Kimball Conformed Dimension: Course
+CREATE TABLE dim_course (
+    course_key      INT PRIMARY KEY, -- Surrogate key
+    course_code     VARCHAR(20) NOT NULL,
+    course_title    VARCHAR(100) NOT NULL,
+    department_key  INT NOT NULL REFERENCES dim_department(department_key),
+    unit_credits    INT NOT NULL
+);
 
-- Inmon uses a top-down architecture centered on a normalized 3NF enterprise
-  core that feeds downstream departmental marts.
-- Kimball uses a bottom-up architecture centered on business processes, atomic
-  star schemas, and conformed dimensions across a bus matrix.
-- Conformed dimensions share identical surrogate keys, column names, and
-  domain values across distinct business processes.
-- Drill-across analysis uses multi-pass queries to aggregate separate fact
-  tables independently before combining results via outer joins on conformed
-  dimensions.
-- Modern cloud data lakehouses combine both approaches: normalized or raw
-  silver staging layers feed Kimball-style dimensional star schemas in the gold
-  serving layer.
+-- Kimball Conformed Dimension: Department
+CREATE TABLE dim_department (
+    department_key  INT PRIMARY KEY, -- Surrogate key
+    department_code VARCHAR(10) NOT NULL,
+    department_name VARCHAR(100) NOT NULL,
+    school_name     VARCHAR(100) NOT NULL
+);
+
+-- Kimball Fact: Student course enrollments
+CREATE TABLE fact_course_enrollment (
+    enrollment_id    BIGINT NOT NULL,
+    term_key         INT NOT NULL REFERENCES dim_term(term_key),
+    student_key      INT NOT NULL REFERENCES dim_student(student_key),
+    course_key       INT NOT NULL REFERENCES dim_course(course_key),
+    enrollment_count INT NOT NULL DEFAULT 1,
+    enrolled_units   INT NOT NULL,
+    PRIMARY KEY (enrollment_id)
+);
+
+-- Kimball Fact: Scheduled course section capacity
+CREATE TABLE fact_section_capacity (
+    section_key      INT NOT NULL,
+    term_key         INT NOT NULL REFERENCES dim_term(term_key),
+    course_key       INT NOT NULL REFERENCES dim_course(course_key),
+    classroom_key    INT NOT NULL REFERENCES dim_classroom(classroom_key),
+    seating_capacity INT NOT NULL,
+    PRIMARY KEY (section_key)
+);
+```
+
+## Operational considerations and engine optimization
+
+When choosing and deploying analytical modeling methodologies, consider the
+following technical factors:
+
+- In distributed cloud engines such as `BigQuery`, joining normalized 3NF tables
+  across multiple parent-child tiers triggers network shuffle operations. Conformed
+  star schemas with wide dimensions allow engines to broadcast dimension tables
+  directly to worker nodes, accelerating query speeds.
+- Maintaining conformed dimensions across independent teams requires formal data
+  governance. You must coordinate changes to attribute definitions in `dim_course`
+  across both registration and facility scheduling pipelines.
+- Drill-across queries execute multiple independent table scans. In cloud data
+  warehouses billed on processed bytes, partition fact tables on term, date, or
+  process keys to minimize query costs.
+
+## Common pitfalls
+
+When implementing dimensional and enterprise warehouse methodologies, watch
+for these common mistakes:
+
+### The chasm trap in drill-across queries
+
+Attempting to join two fact tables directly on a dimension key without
+aggregating each table first multiplies rows and inflates metric sums. Always
+aggregate facts to a common dimension grain within separate `` `subqueries` ``
+or Common Table Expression blocks before joining their summaries.
+
+### Building isolated stovepipe marts
+
+Building departmental star schemas without shared conformed dimensions creates
+disconnected data silos. When the registrar and financial aid offices define
+student attributes independently, enterprise reporting fails due to conflicting
+metrics.
+
+### `Inmon` analysis paralysis
+
+Attempting to design an enterprise-wide 3NF schema before delivering any
+business reporting often leads to months of stalled planning. Use iterative,
+business-process-driven delivery to produce tangible value rapidly.
+
+### Premature aggregation losing atomic detail
+
+Creating fact tables at monthly or departmental summary levels limits
+analytical capabilities. Business users can't drill down into specific courses,
+dates, or instructors. Always capture data at the lowest atomic grain.
+
+## What's next
+
+- Explore star and snowflake structures in
+  [Schema architectures](/modeling/schema-architectures).
+- Learn about transaction, periodic snapshot, and accumulating snapshot designs in
+  [Fact table design and types](/modeling/fact-table-design-and-types).
+- Master multi-table aggregations and query patterns in
+  [Common table expressions](/sql/common-table-expressions).

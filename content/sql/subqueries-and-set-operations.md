@@ -1,303 +1,363 @@
-# Sub queries and set operations
+# Subqueries and set operations
 
 ## Overview
 
-Nested queries and set operations provide foundational mechanisms to combine, filter, and compare data across SQL statements. A nested query is an inner query embedded inside an outer SQL statement. A set operation vertically combines or compares row sets returned by two or more independent queries.
+Subqueries and set operations provide foundational mechanisms to evaluate,
+filter, and combine datasets across Structured Query Language (`SQL`)
+queries. A subquery is an inner query nested within an outer statement. A set
+operation combines or compares row sets returned by two independent queries.
 
-This guide provides an end-to-end operational reference for scalar and correlated nested queries, the three-valued logic null trap in `NOT IN` versus `NOT EXISTS`, and set mechanics for `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
+This guide provides an end-to-end reference for scalar and correlated subqueries,
+the three-valued logic null trap in `NOT IN` versus `NOT EXISTS`, and set
+operations for `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT` using the Stanford
+University academic database.
 
-## Example datasets
+## Reference schema and datasets
 
-The queries in this guide use three tables: `Employees`, `Departments`, and `Contractors`.
+The examples in this guide run against three relations from the Stanford
+University registrar schema: `departments`, `instructors`, and
+`teaching_assistants`.
 
-### `Employees` table
+### Table schemas
 
-| `EmployeeID` | `Name` | `DepartmentID` | `Salary` |
-| :--- | :--- | :--- | :--- |
-| 101 | Alice | 10 | 95000.00 |
-| 102 | Bob | 10 | 80000.00 |
-| 103 | Charlie | 20 | 75000.00 |
-| 104 | Diana | 30 | 110000.00 |
-| 105 | Evan | `NULL` | 60000.00 |
+```sql
+CREATE TABLE departments (
+  department_id   INTEGER PRIMARY KEY,
+  department_name VARCHAR(50) NOT NULL,
+  building        VARCHAR(50) NOT NULL
+);
 
-### `Departments` table
+CREATE TABLE instructors (
+  instructor_id   INTEGER PRIMARY KEY,
+  first_name      VARCHAR(50) NOT NULL,
+  last_name       VARCHAR(50) NOT NULL,
+  department_id   INTEGER REFERENCES departments(department_id),
+  salary          NUMERIC(10, 2) NOT NULL
+);
 
-| `DepartmentID` | `DepartmentName` |
-| :--- | :--- |
-| 10 | Engineering |
-| 20 | Marketing |
-| 30 | Finance |
-| 40 | Legal |
+CREATE TABLE teaching_assistants (
+  assistant_id    INTEGER PRIMARY KEY,
+  first_name      VARCHAR(50) NOT NULL,
+  last_name       VARCHAR(50) NOT NULL,
+  department_id   INTEGER REFERENCES departments(department_id),
+  stipend         NUMERIC(10, 2) NOT NULL
+);
+```
 
-### `Contractors` table
+### Sample data
 
-| `ContractorID` | `Name` | `DepartmentID` | `HourlyRate` |
-| :--- | :--- | :--- | :--- |
-| 501 | Bob | 10 | 85.00 |
-| 502 | Fiona | 10 | 95.00 |
-| 503 | George | 40 | 70.00 |
+#### `departments` table
 
-## Nested query categories
+| `department_id` | `department_name` | `building` |
+| :--- | :--- | :--- |
+| `10` | Computer Science | Gates Building |
+| `20` | Electrical Engineering | Packard Building |
+| `30` | Linguistics | Memorial Hall |
+| `40` | Statistics | Sequoia Hall |
 
-Nested queries fall into three main categories based on the shape of data they return and how they interact with the outer query.
+#### `instructors` table
+
+| `instructor_id` | `first_name` | `last_name` | `department_id` | `salary` |
+| :--- | :--- | :--- | :--- | :--- |
+| `101` | David | Clark | `10` | `140000.00` |
+| `102` | Marcus | Miller | `10` | `120000.00` |
+| `103` | Andrea | Taylor | `20` | `115000.00` |
+| `104` | Sarah | Wilson | `30` | `150000.00` |
+| `105` | Evan | Wright | `NULL` | `90000.00` |
+
+#### `teaching_assistants` table
+
+| `assistant_id` | `first_name` | `last_name` | `department_id` | `stipend` |
+| :--- | :--- | :--- | :--- | :--- |
+| `501` | Marcus | Miller | `10` | `32000.00` |
+| `502` | Fiona | Adams | `10` | `30000.00` |
+| `503` | George | Baker | `40` | `28000.00` |
+
+## Sub-query categories
+
+Sub-queries fall into three main architectures based on their return shape and
+interaction with the outer query:
 
 ```mermaid
----
-title: Nested query classification
----
 flowchart TD
-    Sub["Nested Queries"]
-    Scalar["Scalar Nested Query<br/>Returns 1 row, 1 column<br/>Used in SELECT expressions"]
-    Multi["Multi-Row Nested Query<br/>Returns 1 column, many rows<br/>Used with IN, ANY, ALL"]
-    Corr["Correlated Nested Query<br/>References outer row values<br/>Evaluates iteratively"]
-
-    Sub --- Scalar
-    Sub --- Multi
-    Sub --- Corr
+    subgraph Subqueries ["Sub-query architectures"]
+        direction TB
+        Scalar["Scalar sub-query: returns 1 row and 1 column for expressions"]
+        Multi["Multi-row sub-query: returns 1 column and multiple rows for IN and ANY"]
+        Corr["Correlated sub-query: references outer row context evaluated per row"]
+    end
 ```
 
-### Scalar nested queries
+### Scalar sub-queries
 
-A scalar nested query returns exactly one value: a single row with a single column. You can place a scalar nested query anywhere the database accepts a single literal or expression.
+A scalar sub-query returns a single cell value: exactly one row and one column.
+You can place a scalar sub-query anywhere the database accepts an expression or
+literal.
 
-The following query compares each employee salary to the company-wide average salary:
+The following query compares each faculty salary to the university-wide average
+instructor salary:
 
 ```sql
 SELECT
-  EmployeeID,
-  Name,
-  Salary,
+  instructor_id,
+  first_name,
+  last_name,
+  salary,
   ROUND(
-    Salary - (SELECT AVG(Salary) FROM Employees),
+    salary - (SELECT AVG(salary) FROM instructors),
     2
-  ) AS DifferenceFromAvg
-FROM Employees;
+  ) AS diff_from_avg
+FROM instructors;
 ```
 
-#### Query execution mechanics
+#### Scalar sub-query execution flow
 
-1. The scalar nested query `(SELECT AVG(Salary) FROM Employees)` executes first, computing the company average: `84000.00`.
-2. The outer query substitutes this computed constant into each evaluated row.
+1. The scalar sub-query `SELECT AVG(salary) FROM instructors` executes once,
+   computing the university faculty average: `123000.00`.
+2. The outer query substitutes this constant into each evaluated row.
 
-#### Output table
+#### Result set
 
-| `EmployeeID` | `Name` | `Salary` | `DifferenceFromAvg` |
-| :--- | :--- | :--- | :--- |
-| 101 | Alice | 95000.00 | 11000.00 |
-| 102 | Bob | 80000.00 | -4000.00 |
-| 103 | Charlie | 75000.00 | -9000.00 |
-| 104 | Diana | 110000.00 | 26000.00 |
-| 105 | Evan | 60000.00 | -24000.00 |
+| `instructor_id` | `first_name` | `last_name` | `salary` | `diff_from_avg` |
+| :--- | :--- | :--- | :--- | :--- |
+| `101` | David | Clark | `140000.00` | `17000.00` |
+| `102` | Marcus | Miller | `120000.00` | `-3000.00` |
+| `103` | Andrea | Taylor | `115000.00` | `-8000.00` |
+| `104` | Sarah | Wilson | `150000.00` | `27000.00` |
+| `105` | Evan | Wright | `90000.00` | `-33000.00` |
 
-If a scalar nested query returns more than one row at runtime, the database engine aborts execution with a cardinal violation error. If the inner query returns zero rows, the expression evaluates to `NULL`.
+If a scalar sub-query returns more than one row at runtime, the engine aborts
+execution with a cardinality violation error. If the sub-query returns zero rows,
+the expression evaluates to `NULL`.
 
-### Correlated nested queries
+### Correlated sub-queries
 
-A correlated nested query references columns from the outer query table. Unlike independent nested queries that evaluate once, a correlated nested query depends on the current row context of the outer query.
+A correlated sub-query references attributes from the outer query row. Unlike
+independent sub-queries that evaluate once, a correlated sub-query depends on the
+current tuple context of the outer query.
 
-The following query finds employees who earn more than the average salary of their own department:
+The following query finds instructors who earn more than the average salary of
+their own department:
 
 ```sql
 SELECT
-  e.EmployeeID,
-  e.Name,
-  e.DepartmentID,
-  e.Salary
-FROM Employees AS e
-WHERE e.Salary > (
-  SELECT AVG(inner_emp.Salary)
-  FROM Employees AS inner_emp
-  WHERE inner_emp.DepartmentID = e.DepartmentID
+  outer_inst.instructor_id,
+  outer_inst.first_name,
+  outer_inst.last_name,
+  outer_inst.department_id,
+  outer_inst.salary
+FROM instructors AS outer_inst
+WHERE outer_inst.salary > (
+  SELECT AVG(inner_inst.salary)
+  FROM instructors AS inner_inst
+  WHERE inner_inst.department_id = outer_inst.department_id
 );
 ```
 
 #### Step-by-step correlation trace
 
-- For Alice `(Dept 10, Salary 95000.00)`: the inner query computes the Department 10 average `(95000 + 80000) / 2 = 87500.00`. Because `95000.00 > 87500.00`, the query retains Alice.
-- For Bob `(Dept 10, Salary 80000.00)`: the inner query computes `87500.00`. Because `80000.00` isn't greater than `87500.00`, the query discards Bob.
-- For Charlie `(Dept 20, Salary 75000.00)`: the only employee in Department 20 is Charlie, so the department average is `75000.00`. The comparison `75000 > 75000` evaluates to false, discarding Charlie.
-- For Diana `(Dept 30, Salary 110000.00)`: the department average is `110000.00`. Discarded.
-- For Evan `(Dept NULL)`: `inner_emp.DepartmentID = NULL` produces `UNKNOWN`, yielding no rows and a `NULL` average. Discarded.
+- David Clark, Department `10`, salary `140000.00`: the sub-query computes the
+  Department 10 average, `(140000 + 120000) / 2 = 130000.00`. Because
+  `140000.00 > 130000.00`, the query retains David Clark.
+- Marcus Miller, Department `10`, salary `120000.00`: the sub-query computes
+  `130000.00`. Because `120000.00` is less than `130000.00`, the engine discards
+  Marcus Miller.
+- Andrea Taylor, Department `20`, salary `115000.00`: the only faculty member in
+  Department 20 is Andrea Taylor, so the department average is `115000.00`.
+  Because `115000.00 > 115000.00` evaluates to `FALSE`, the engine discards
+  Andrea Taylor.
+- Sarah Wilson, Department `30`, salary `150000.00`: the department average is
+  `150000.00`. Discarded.
+- Evan Wright, Department `NULL`: `inner_inst.department_id = NULL` evaluates to
+  `UNKNOWN`, yielding no rows and a `NULL` average. Discarded.
 
-#### Output table
+#### Result set
 
-| `EmployeeID` | `Name` | `DepartmentID` | `Salary` |
-| :--- | :--- | :--- | :--- |
-| 101 | Alice | 10 | 95000.00 |
+| `instructor_id` | `first_name` | `last_name` | `department_id` | `salary` |
+| :--- | :--- | :--- | :--- | :--- |
+| `101` | David | Clark | `10` | `140000.00` |
 
-## Predicate evaluations: `EXISTS` versus `IN`
+## Predicate evaluations: `EXISTS` compared with `IN`
 
-Both `EXISTS` and `IN` test whether related records exist in another dataset, but their evaluation models differ fundamentally.
+Both `EXISTS` and `IN` test whether related records exist in another dataset,
+but their evaluation engines behave differently.
 
-### `EXISTS` mechanics
+### How the `EXISTS` operator works
 
-`EXISTS` tests whether a nested query returns at least one row. The database engine short-circuits evaluation immediately upon discovering a single matching row, ignoring the column projection list in the nested query:
+`EXISTS` tests whether a sub-query returns at least one record. The database
+engine short-circuits evaluation immediately upon discovering a single matching
+row, ignoring the column projection list in the sub-query:
 
 ```sql
 SELECT
-  d.DepartmentID,
-  d.DepartmentName
-FROM Departments AS d
+  d.department_id,
+  d.department_name
+FROM departments AS d
 WHERE EXISTS (
   SELECT 1
-  FROM Employees AS e
-  WHERE e.DepartmentID = d.DepartmentID
+  FROM instructors AS i
+  WHERE i.department_id = d.department_id
 );
 ```
 
-#### Query result
+#### Result set
 
-| `DepartmentID` | `DepartmentName` |
+| `department_id` | `department_name` |
 | :--- | :--- |
-| 10 | Engineering |
-| 20 | Marketing |
-| 30 | Finance |
+| `10` | Computer Science |
+| `20` | Electrical Engineering |
+| `30` | Linguistics |
 
-Legal `(Department 40)` has no employees in the table, so the nested query returns zero rows and the outer query excludes it.
+Statistics, Department `40`, has no faculty in the `instructors` table, so the
+sub-query yields zero records and the outer query excludes it.
 
-### The dangerous null trap: `NOT IN` versus `NOT EXISTS`
+### The null trap: `NOT IN` compared with `NOT EXISTS`
 
-A classic production hazard in SQL occurs when using `NOT IN` against an inner query that contains a `NULL` value.
+A classic production issue in `SQL` occurs when using `NOT IN` against a sub-query
+that contains a `NULL` value.
 
-Consider a table of audited departments that contains a `NULL` record:
+Consider a table of accredited departments that contains an unverified `NULL`
+record:
 
-| `DepartmentID` |
+| `department_id` |
 | :--- |
-| 20 |
-| 40 |
+| `20` |
+| `40` |
 | `NULL` |
 
-An engineer attempts to find departments that haven't undergone an audit:
+An analyst attempts to find departments that lack formal accreditation:
 
 ```sql
--- DANGEROUS: Returns zero rows when AuditedDepartments contains NULL
-SELECT DepartmentName
-FROM Departments
-WHERE DepartmentID NOT IN (
-  SELECT DepartmentID
-  FROM AuditedDepartments
+-- DANGEROUS: Returns zero rows when accredited_departments contains NULL
+SELECT department_name
+FROM departments
+WHERE department_id NOT IN (
+  SELECT department_id
+  FROM accredited_departments
 );
 ```
 
-#### Why `NOT IN` fails with nulls
+#### Why `NOT IN` fails with null values
 
-Under standard SQL rules, `DepartmentID NOT IN (20, 40, NULL)` expands into a conjunction of inequality comparisons:
+Under standard `SQL` logic, `department_id NOT IN (20, 40, NULL)` expands into
+a conjunction of inequality checks:
 
 ```sql
-DepartmentID <> 20 AND DepartmentID <> 40 AND DepartmentID <> NULL
+department_id <> 20 AND department_id <> 40 AND department_id <> NULL
 ```
 
-Now evaluate this condition for Engineering `(DepartmentID = 10)`:
+Evaluate this condition for Computer Science, Department `10`:
 
 1. `10 <> 20` evaluates to `TRUE`.
 2. `10 <> 40` evaluates to `TRUE`.
 3. `10 <> NULL` evaluates to `UNKNOWN`.
 4. `TRUE AND TRUE AND UNKNOWN` evaluates to `UNKNOWN`.
 
-Because a `WHERE` clause keeps only rows that evaluate strictly to `TRUE`, the engine discards Engineering. In fact, **every single department evaluates to `UNKNOWN`**, and the query returns zero rows.
+Because a `WHERE` clause accepts rows only when the predicate evaluates strictly
+to `TRUE`, the engine discards Computer Science. In fact, every single department
+evaluates to `UNKNOWN`, and the query returns zero rows.
 
-#### The robust solution: `NOT EXISTS`
+#### Reliable evaluation with `NOT EXISTS`
 
-Use `NOT EXISTS` instead of `NOT IN`. `NOT EXISTS` checks for the presence or absence of rows rather than testing value equality. Because a row containing `NULL` is still a valid row, existence checks evaluate to a clean Boolean `TRUE` or `FALSE`:
+Use `NOT EXISTS` instead of `NOT IN`. `NOT EXISTS` checks for the presence or
+absence of rows rather than testing value equality. Because a row containing
+`NULL` is still an existing row, existence checks evaluate to a Boolean `TRUE`
+or `FALSE`:
 
 ```sql
--- RELIABLE: Correctly returns un-audited departments
-SELECT d.DepartmentName
-FROM Departments AS d
+-- RELIABLE: Correctly returns unaccredited departments
+SELECT d.department_name
+FROM departments AS d
 WHERE NOT EXISTS (
   SELECT 1
-  FROM AuditedDepartments AS a
-  WHERE a.DepartmentID = d.DepartmentID
+  FROM accredited_departments AS a
+  WHERE a.department_id = d.department_id
 );
 ```
 
-#### Output table with `NOT EXISTS`
+#### Result set with `NOT EXISTS`
 
-| `DepartmentName` |
+| `department_name` |
 | :--- |
-| Engineering |
-| Finance |
+| Computer Science |
+| Linguistics |
 
 ## Set operations
 
-Set operations combine the result sets of two independent `SELECT` queries vertically.
+Set operations combine the result sets of two independent `SELECT` queries
+vertically.
 
 ```mermaid
----
-title: Relational set operations
----
 flowchart TD
-    subgraph U ["UNION ALL / UNION"]
-        direction LR
-        U1["Table A"] --- U2["Table B"]
-    end
-
-    subgraph I ["INTERSECT"]
-        direction LR
-        I1["Table A"] === I2["Shared Rows"] === I3["Table B"]
-    end
-
-    subgraph E ["EXCEPT (A - B)"]
-        direction LR
-        E1["Rows only in Table A"]
+    subgraph Operations ["Relational set operations"]
+        direction TB
+        U["UNION ALL and UNION: combines rows from relation A and relation B"]
+        I["INTERSECT: returns tuples present in both relation A and relation B"]
+        E["EXCEPT: returns tuples present in relation A but absent from relation B"]
     end
 ```
 
 ### Compatibility rules
 
-1. Both queries must project the exact same number of columns.
+1. Both queries must project the exact same number of attributes.
 2. Corresponding column positions must share compatible data types.
 3. The resulting column headers match the names defined in the first query.
 
 ### Comparing `UNION ALL`, `UNION`, `INTERSECT`, and `EXCEPT`
 
-The following queries contrast all four set operations between staff names in `Employees` and contractor names in `Contractors`:
+The following queries contrast all four set operations between faculty in
+`instructors` and graduate assistants in `teaching_assistants`:
 
 #### `UNION ALL`: appends all rows preserving duplicates
 
 ```sql
-SELECT Name FROM Employees
+SELECT first_name, last_name FROM instructors
 UNION ALL
-SELECT Name FROM Contractors;
+SELECT first_name, last_name FROM teaching_assistants;
 ```
 
-The output returns all eight records from both sources, including Alice, Bob, Charlie, Diana, Evan, Bob, Fiona, and George.
+The output returns all eight rows from both sources, retaining the duplicate
+record for Marcus Miller.
 
 #### `UNION`: appends rows and removes duplicates
 
 ```sql
-SELECT Name FROM Employees
+SELECT first_name, last_name FROM instructors
 UNION
-SELECT Name FROM Contractors;
+SELECT first_name, last_name FROM teaching_assistants;
 ```
 
-The output removes the duplicate entry for Bob, returning seven unique names.
+The output eliminates the duplicate entry for Marcus Miller, returning seven
+unique names.
 
 #### `INTERSECT`: returns rows shared by both queries
 
 ```sql
-SELECT Name FROM Employees
+SELECT first_name, last_name FROM instructors
 INTERSECT
-SELECT Name FROM Contractors;
+SELECT first_name, last_name FROM teaching_assistants;
 ```
 
-The output returns only Bob, the single person appearing in both tables.
+The output returns only Marcus Miller, the single academic who appears in both
+relations.
 
-#### `EXCEPT`: returns rows in query 1 that aren't in query 2
+#### `EXCEPT`: returns rows in query 1 that are absent from query 2
 
 ```sql
-SELECT Name FROM Employees
+SELECT first_name, last_name FROM instructors
 EXCEPT
-SELECT Name FROM Contractors;
+SELECT first_name, last_name FROM teaching_assistants;
 ```
 
-The output returns Alice, Charlie, Diana, and Evan. The query excludes Bob because Bob appears in `Contractors`.
+The output returns David Clark, Andrea Taylor, Sarah Wilson, and Evan Wright.
+The query excludes Marcus Miller because Marcus Miller appears in
+`teaching_assistants`.
 
 ### Summary matrix of set operations
 
 | Operator | Action | Duplicate handling | Performance characteristics |
 | :--- | :--- | :--- | :--- |
-| `UNION ALL` | Appends row streams directly | Preserves all duplicate rows | High throughput: streams rows directly without hashing |
+| `UNION ALL` | Appends row streams directly | Preserves all duplicate rows | High throughput: streams rows without hashing |
 | `UNION` | Appends row streams | Eliminates duplicate rows | Requires memory hash table or sort operation |
 | `INTERSECT` | Finds common rows | Retains distinct matching rows | Requires hash join or sort between both inputs |
 | `EXCEPT` | Subtracts second set from first | Retains distinct remaining rows | Requires hash anti-join or sort operation |
@@ -306,39 +366,58 @@ The output returns Alice, Charlie, Diana, and Evan. The query excludes Bob becau
 
 ### Positional alignment errors
 
-Set operations align columns by position, never by name. Swapping columns in the second query produces mixed values without throwing a syntax error if data types match:
+Set operations align columns by position, never by attribute name. Swapping
+columns in the second query mixes data values without throwing an error if data
+types match:
 
 ```sql
--- INCORRECT: Recipient names and department names swap columns
-SELECT Name, DepartmentName FROM Employees JOIN Departments USING (DepartmentID)
+-- INCORRECT: Instructor name and department name swap positions
+SELECT first_name, department_name FROM instructors JOIN departments USING (department_id)
 UNION ALL
-SELECT DepartmentName, Name FROM Contractors JOIN Departments USING (DepartmentID);
+SELECT department_name, first_name FROM teaching_assistants JOIN departments USING (department_id);
 ```
 
-Always verify that column order matches precisely across all queries in the set block.
+Always verify that column order matches across all queries in the set block.
 
-### Correlated nested query performance degradation
+### Correlated sub-query performance degradation
 
-A correlated nested query that executes inside a large table can force the engine to run an $O(N \times M)$ nested loop.
+A correlated sub-query evaluated across a large table forces the engine to run an
+$O(N \times M)$ nested loop.
 
-Whenever possible, rewrite correlated nested queries into set-based `LEFT JOIN` or window function operations:
+Whenever possible, rewrite correlated sub-queries into set-based `LEFT JOIN` or
+analytic window operations:
 
 ```sql
--- Suboptimal correlated nested query:
-SELECT e.Name, (SELECT d.DepartmentName FROM Departments d WHERE d.DepartmentID = e.DepartmentID)
-FROM Employees e;
+-- Suboptimal correlated sub-query:
+SELECT
+  i.first_name,
+  i.last_name,
+  (SELECT d.department_name FROM departments AS d WHERE d.department_id = i.department_id) AS department_name
+FROM instructors AS i;
 
 -- Optimal set-based join:
-SELECT e.Name, d.DepartmentName
-FROM Employees AS e
-LEFT JOIN Departments AS d
-  ON e.DepartmentID = d.DepartmentID;
+SELECT
+  i.first_name,
+  i.last_name,
+  d.department_name
+FROM instructors AS i
+LEFT JOIN departments AS d
+  ON i.department_id = d.department_id;
 ```
 
 ## Key takeaways
 
-- Use scalar nested queries when you need a single value inside a projection expression.
-- Use correlated nested queries to evaluate row-specific conditions against an outer record stream.
-- Always prefer `NOT EXISTS` over `NOT IN` when comparing columns that can contain `NULL` values to avoid the three-valued logic pitfall.
-- Choose `UNION ALL` over `UNION` by default to avoid the memory and CPU overhead of distinct duplicate removal when duplicate rows are valid or impossible.
+- Use scalar sub-queries when returning a single metric inside a projection expression.
+- Use correlated sub-queries to evaluate row-specific conditions against an outer record stream.
+- Prefer `NOT EXISTS` over `NOT IN` when comparing columns that accept null values to avoid three-valued logic failures.
+- Choose `UNION ALL` over `UNION` by default to avoid the memory and CPU overhead of distinct duplicate elimination when duplicate rows are acceptable.
 - Align columns strictly by position and compatible data types when using set operators.
+
+## What's next
+
+- Explore window functions, partition frames, and rankings in
+  [Analytical and window functions](/sql/analytical-and-window-functions).
+- Learn relative row offsets with `LAG` and `LEAD` in
+  [Value and frame navigation](/sql/value-and-frame-navigation).
+- Structure multi-step transformation pipelines using
+  [Common table expressions](/sql/common-table-expressions).

@@ -255,13 +255,13 @@ RAM. Reading a page from memory is generally faster than reading it from
 storage, so the buffer pool reduces repeated storage access for frequently
 used pages.
 
-The buffer pool contains:
+The buffer pool contains several key structures:
 
-- **Frames:** fixed-size memory regions that hold database pages.
-- **Page table:** an in-memory mapping from a page ID to a frame.
-- **Dirty bit:** indicates that the memory copy differs from the durable copy.
-- **Pin count:** prevents the engine from evicting a page while a query uses it.
-- **Eviction policy:** selects an unpinned page when the pool needs space.
+- Frames are fixed-size memory regions that hold database pages.
+- The page table is an in-memory mapping from a page ID to a frame.
+- The dirty bit indicates that the memory copy differs from the durable copy.
+- The pin count prevents the engine from evicting a page while a query uses it.
+- An eviction policy selects an unpinned page when the pool needs space.
 
 Common eviction strategies include least recently used and Clock
 variants. The selected policy and its tuning options depend on the database
@@ -314,8 +314,8 @@ The engine uses the write-ahead log and checkpoint metadata to restore a consist
 
 Many engines describe recovery as two broad activities:
 
-- **Redo:** reapply logged changes that the data pages might not contain.
-- **Undo:** remove changes from transactions that had not committed.
+- Redo reapplies logged changes that the data pages might not contain.
+- Undo removes changes from transactions that had not committed.
 
 The recovery algorithm, terminology, and ordering can vary. Some engines also
 use full-page images, checksums, double-write buffers, or other mechanisms to
@@ -326,9 +326,9 @@ protect against partial page writes.
 Consider this statement:
 
 ```sql
-UPDATE Employees
-SET Salary = 95000
-WHERE EmployeeID = 101;
+UPDATE instructors
+SET salary = 145000.00
+WHERE instructor_id = 101;
 ```
 
 The storage path is conceptually:
@@ -338,8 +338,8 @@ The storage path is conceptually:
 title: Update execution flow
 ---
 flowchart TD
-    Req["UPDATE Request<br/>(EmployeeID = 101, Salary = 95000)"]
-    Req --> Step1["1. Locate page for Employee 101"]
+    Req["UPDATE Request<br/>instructor_id = 101, salary = 145000.00"]
+    Req --> Step1["1. Locate page for instructor 101"]
     Step1 --> Check{"Page in buffer pool?"}
 
     Check -- "Yes (Cache hit)" --> Pin["Pin buffer frame"]
@@ -363,7 +363,7 @@ flowchart TD
 The steps are:
 
 1. The query executor asks the buffer manager for the page containing
-   `EmployeeID = 101`.
+   `instructor_id = 101`.
 2. On a buffer miss, the buffer manager reads the page from the heap file into
    an available frame.
 3. The engine appends a write-ahead log record describing the update.
@@ -427,3 +427,12 @@ mechanisms your database engine and storage configuration provide.
   transactions.
 - Checkpoint and cache settings affect both normal performance and recovery
   time.
+
+## What's next
+
+- Master B-tree traversal, clustered indexes, and covering indexes in
+  [Indexing internals](/sql/indexing-internals).
+- Understand how query parsers, planners, and executors run queries in
+  [Query execution engine](/sql/query-execution-engine).
+- Explore join algorithms and cost-based optimizations in
+  [Advanced query optimization](/sql/advanced-query-optimization).

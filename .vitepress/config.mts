@@ -118,8 +118,8 @@ export default defineConfig({
                 link: "/modeling/entities-attributes-and-relationships",
               },
               {
-                text: "Database normalization mechanics",
-                link: "/modeling/database-normalization-mechanics",
+                text: "Database normalization",
+                link: "/modeling/database-normalization",
               },
               {
                 text: "Dimensional modeling methodology",

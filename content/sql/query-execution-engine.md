@@ -1,21 +1,23 @@
-﻿# Query execution engine
+# Query execution engine
 
 ## Overview
 
-SQL is a declarative language. You describe the data you want, and the query
-optimizer decides how to retrieve and process it efficiently.
+Structured Query Language, or `SQL`, is a declarative language. You describe the
+data you want, and the query optimizer decides how to retrieve and process it
+efficiently.
 
-This guide explains two ideas that matter when you write and troubleshoot SQL:
+This guide explains two concepts that govern query execution:
 
-- the logical order in which the database evaluates a query
-- the `EXPLAIN` plan that shows the physical work chosen by the optimizer
+- The logical order in which the database evaluates a query.
+- The `EXPLAIN` plan that shows the physical work chosen by the optimizer.
 
-The written SQL order and the actual execution order are different. That's why
-it's important to understand both semantic behavior and performance behavior.
+The written `SQL` syntax order and the actual execution sequence are different.
+Understanding both semantic evaluation and physical execution is essential for
+optimizing query performance.
 
 ## Logical execution order
 
-You usually write SQL in this order:
+Developers write `SQL` queries in the following syntactic order:
 
 ```sql
 SELECT
@@ -27,12 +29,9 @@ ORDER BY
 LIMIT
 ```
 
-The database engine usually evaluates a query in this order instead:
+The database engine evaluates query components in this logical order instead:
 
 ```mermaid
----
-title: "Logical execution order"
----
 flowchart LR
   A[FROM] --> B[WHERE]
   B --> C[GROUP BY]
@@ -42,263 +41,230 @@ flowchart LR
   F --> G[LIMIT]
 ```
 
-This order describes the logical execution pipeline. It's the model that
-explains how the engine filters rows, groups them, computes expressions, sorts
-the results, and limits the output.
+This order describes the logical execution pipeline. It models how the engine
+filters records, groups them, computes aggregates, sorts results, and limits
+output.
 
 ### Reading source rows
 
-The engine starts with the tables listed in the `FROM` clause. If the query has
-join conditions, it combines rows from those tables before any other work.
+The engine starts with the relations listed in the `FROM` clause. If the query
+specifies join conditions, it pairs rows from those tables before performing
+subsequent operations.
 
-This step creates the input row set for the rest of the query.
+This step creates the base row set for the rest of the query.
 
 ### Filtering rows
 
 The `WHERE` clause filters individual rows before aggregation. Only rows that
-match the predicate continue to the next stage.
+evaluate to `TRUE` continue to the next stage.
 
-This early filter is important for performance because it reduces the number of
-rows that later steps must process.
+Filtering early reduces the volume of data that subsequent grouping and sorting
+stages must process.
 
 ### Grouping data
 
-The `GROUP BY` clause partitions rows into buckets based on one or more column
-values. Rows with the same group key go to the same bucket.
+The `GROUP BY` clause partitions rows into buckets based on one or more grouping
+keys. Rows sharing identical group keys enter the same bucket.
 
-After grouping, aggregate functions such as `SUM`, `COUNT`, and `AVG` operate on
-those groups.
+After grouping, aggregate functions such as `SUM`, `COUNT`, and `AVG` compute
+summary metrics across each bucket.
 
 ### Filtering grouped data
 
-The `HAVING` clause filters grouped results after aggregation. It's the right
-place for conditions such as `SUM(amount) > 50000`.
+The `HAVING` clause filters grouped results after aggregation. It tests
+conditions on aggregate metrics, such as `SUM(grant_amount) > 50000.00`.
 
-This is different from `WHERE`, which runs before the grouping step.
+This differs from `WHERE`, which evaluates individual records before grouping.
 
 ### Selecting output columns
 
-The `SELECT` clause shapes the final output. It chooses which columns to return,
-computes expressions, and assigns aliases.
+The `SELECT` clause shapes the final output. It projects requested columns,
+computes expressions, and assigns column aliases.
 
-The engine evaluates this stage after it finishes row filtering and grouping.
+The engine evaluates this stage after row filtering and grouping complete.
 
 ### Sorting and limiting
 
-The `ORDER BY` clause sorts the final rows. The `LIMIT` or `OFFSET` clause then
-restricts the number of rows returned.
+The `ORDER BY` clause sorts the projected rows. The `LIMIT` or `OFFSET` clause
+then restricts the number of rows emitted to the client.
 
-This is why the final output order doesn't always match the order of the source
-rows.
+Because sorting occurs near the end of the pipeline, column aliases defined in
+`SELECT` are valid in `ORDER BY`.
 
 ## Explain plans and the optimizer
 
-The logical execution order explains SQL semantics. The optimizer explains how the
-engine executes the query in practice.
+The logical execution order explains `SQL` semantics. The optimizer determines
+how the engine executes the query in practice.
 
-A database optimizer converts a declarative SQL statement into a physical
-execution plan. It decides which access path to use, which joins to perform,
-and which operators to run first.
+A cost-based query optimizer converts a declarative `SQL` statement into a
+physical execution plan. It selects access paths, join algorithms, and execution
+order:
 
 ```mermaid
----
-title: "Query execution plan"
----
 flowchart LR
-  A[SQL query] --> B[parsed statement]
-  B --> C[logical plan]
-  C --> D[physical plan]
-  D --> E[explain tree]
+  A[SQL query] --> B[Parsed statement]
+  B --> C[Logical plan]
+  C --> D[Physical plan]
+  D --> E[Explain tree]
 ```
 
-An `EXPLAIN` plan shows the sequence of physical operations, access methods, join
-algorithms, and estimated costs chosen by the optimizer.
+An `EXPLAIN` plan displays the physical operations, access methods, join
+algorithms, and estimated execution costs chosen by the optimizer.
 
 ### What an explain plan includes
 
-An explain plan can show:
+An explain plan displays:
 
-- table scans or index scans
-- filter operators
-- join operators such as nested loops, hash joins, or merge joins
-- grouping and aggregation
-- sorting
-- limit and offset
+- Table scans and index range scans.
+- Filter operators and predicate push-down.
+- Join algorithms such as nested loops, hash joins, and merge joins.
+- Grouping and aggregation operators.
+- In-memory and external sorting passes.
+- Limit and offset boundaries.
 
-These details help answer questions such as:
-
-- Did the optimizer use an index?
-- Did the engine filter rows early?
-- Did it sort a large intermediate result?
-- Was the join order effective?
+These details reveal whether the optimizer used indexes, filtered rows early,
+or sorted large intermediate sets.
 
 ## Complete example
 
-Consider a database with two tables: `Customers` and `Orders`. The goal is to
-return the top two regions with total sales greater than $50,000 for orders
-placed in 2025.
+Consider two tables from the Stanford University research administration schema:
+`departments` and `research_project_grants`. The query identifies the top two
+academic departments with total research funding exceeding $50,000 for grants
+awarded in 2025:
 
 ```sql
 SELECT
-  c.Region AS CustomerRegion,
-  SUM(o.OrderAmount) AS TotalRevenue,
-  COUNT(o.OrderID) AS TotalOrders
-FROM Customers c
-JOIN Orders o
-  ON c.CustomerID = o.CustomerID
-WHERE o.OrderDate >= '2025-01-01'
-GROUP BY c.Region
-HAVING SUM(o.OrderAmount) > 50000
-ORDER BY TotalRevenue DESC
+  d.department_name,
+  SUM(g.grant_amount) AS total_funding,
+  COUNT(g.grant_id) AS total_grants
+FROM departments AS d
+JOIN research_project_grants AS g
+  ON d.department_id = g.department_id
+WHERE g.award_date >= '2025-01-01'
+GROUP BY d.department_name
+HAVING SUM(g.grant_amount) > 50000.00
+ORDER BY total_funding DESC
 LIMIT 2;
 ```
 
-### Example flow
+### Query execution flow
 
 ```mermaid
----
-title: SQL Query Execution Flow
----
 flowchart TD
-    %% Input Tables
-    subgraph DataSources ["Input Data Sources"]
+    subgraph DataSources ["Input data sources"]
         direction LR
-        Cust["<b>Customers</b><br/>10,000 rows"]
-        Ord["<b>Orders</b><br/>500,000 rows"]
+        Dept["departments: 50 rows"]
+        Grants["research_project_grants: 50,000 rows"]
     end
 
-    %% Execution Steps
-    Step1["<b>Step 1: FROM & JOIN</b><br/>ON c.CustomerID = o.CustomerID"]
-    Step2["<b>Step 2: WHERE</b><br/>o.OrderDate >= '2025-01-01'"]
-    Step3["<b>Step 3: GROUP BY</b><br/>c.Region"]
-    Step4["<b>Step 4: HAVING</b><br/>SUM(o.OrderAmount) > 50000"]
-    Step5["<b>Step 5: SELECT</b><br/>c.Region AS CustomerRegion<br/>SUM(o.OrderAmount) AS TotalRevenue<br/>COUNT(o.OrderID) AS TotalOrders"]
-    Step6["<b>Step 6: ORDER BY</b><br/>TotalRevenue DESC"]
-    Step7["<b>Step 7: LIMIT 2</b><br/>Restrict to top 2 records"]
+    Step1["Step 1: FROM and JOIN on d.department_id = g.department_id"]
+    Step2["Step 2: WHERE filter on g.award_date >= '2025-01-01'"]
+    Step3["Step 3: GROUP BY d.department_name"]
+    Step4["Step 4: HAVING filter on SUM(grant_amount) > 50000.00"]
+    Step5["Step 5: SELECT d.department_name, SUM(grant_amount), COUNT(grant_id)"]
+    Step6["Step 6: ORDER BY total_funding DESC"]
+    Step7["Step 7: LIMIT 2 - return top 2 records"]
 
-    %% Final Output
-    Result["<b>Final Result Set</b><br/>2 rows"]
+    Result["Final result set: 2 rows"]
 
-    %% Flow Connections & Transformations
-    Cust --> Step1
-    Ord --> Step1
-    
+    Dept --> Step1
+    Grants --> Step1
+
     Step1 -->|"Combined joined rows"| Step2
-    Step2 -->|"Filter by date"| Step3
-    Step3 -->|"Group by region"| Step4
-    Step4 -->|"Keep large groups (> $50,000)"| Step5
-    Step5 -->|"Compute totals & aliases"| Step6
-    Step6 -->|"Sort by revenue descending"| Step7
-    Step7 -->|"Return top 2 rows"| Result
-
-    %% Styling
-    style DataSources fill:none,stroke:none
-    style Result fill:#166534,stroke:#22c55e,color:#fff
+    Step2 -->|"Filter by award date"| Step3
+    Step3 -->|"Group by department"| Step4
+    Step4 -->|"Keep high-funding groups"| Step5
+    Step5 -->|"Compute totals and aliases"| Step6
+    Step6 -->|"Sort by funding descending"| Step7
+    Step7 -->|"Emit top 2 rows"| Result
 ```
 
-This flow matches the logical execution model. The database doesn't read the
-query in the grammatical order you wrote it. The engine follows the evaluation
-pipeline described earlier.
+This pipeline matches the logical execution model. The database evaluates the
+query following the step sequence rather than the written clause order.
 
-### Example explain plan
+### Physical explain plan
 
-The following output is representative of a PostgreSQL-style explain plan:
+The following diagram illustrates a physical execution tree:
 
 ```mermaid
----
-title: Database Physical Execution Plan
----
 flowchart BT
-    %% Leaf Access Operations
-    subgraph StorageLayer ["Physical Table Access"]
+    subgraph StorageLayer ["Physical table access"]
         direction LR
-        CustScan["<b>Seq Scan on Customers (c)</b><br/>Est. Rows: 10,000"]
-        OrdScan["<b>Index Range Scan on Orders (o)</b><br/>Index: idx_order_date<br/>Filter: o.OrderDate >= '2025-01-01'<br/>Est. Rows: ~100,000"]
+        DeptScan["Seq scan on departments d: estimated 50 rows"]
+        GrantScan["Index scan on research_project_grants g: filter on award_date"]
     end
 
-    %% Hash & Join Phase
-    HashBuild["<b>Hash (Build Phase)</b><br/>In-memory hash table on CustomerID"]
-    HashJoin["<b>Hash Join (Probe Phase)</b><br/>Join Cond: o.CustomerID = c.CustomerID"]
+    HashBuild["Hash build: in-memory hash table on department_id"]
+    HashJoin["Hash join: probe matching department_id"]
+    HashAgg["Hash aggregate: group key d.department_name"]
+    HavingFilter["Filter operator: SUM(grant_amount) > 50000.00"]
+    SortLimit["Top-N sort and limit: sort key total_funding DESC, limit 2"]
+    Result["Query output: 2 rows"]
 
-    %% Grouping & Aggregation
-    HashAgg["<b>Hash Aggregate</b><br/>Group Key: c.Region<br/>Compute: SUM(OrderAmount), COUNT(OrderID)"]
-
-    %% Having Filter
-    HavingFilter["<b>Filter Operator</b><br/>Filter: SUM(OrderAmount) > 50000"]
-
-    %% Sorting & Limit
-    SortLimit["<b>Top-N Sort & Limit</b><br/>Sort Key: TotalRevenue DESC<br/>Limit: 2"]
-
-    %% Final Result
-    Result["<b>Query Result Output</b><br/>2 rows"]
-
-    %% Data Flow (Bottom-to-Top)
-    CustScan --> HashBuild
+    DeptScan --> HashBuild
     HashBuild --> HashJoin
-    OrdScan --> HashJoin
-    
-    HashJoin -->|"~100k joined rows"| HashAgg
-    HashAgg -->|"Grouped by Region"| HavingFilter
-    HavingFilter -->|"Qualified Regions"| SortLimit
-    SortLimit -->|"Top 2 rows"| Result
+    GrantScan --> HashJoin
 
-    %% Styling
-    style StorageLayer fill:none,stroke:none
-    style Result fill:#166534,stroke:#22c55e,color:#fff
-    style HashJoin fill:#1e3a8a,stroke:#3b82f6,color:#fff
-    style HashAgg fill:#1e3a8a,stroke:#3b82f6,color:#fff
+    HashJoin -->|"Joined tuples"| HashAgg
+    HashAgg -->|"Aggregated departments"| HavingFilter
+    HavingFilter -->|"Qualified departments"| SortLimit
+    SortLimit -->|"Top 2 rows"| Result
 ```
 
-This plan shows that the optimizer chose:
+The optimizer chose:
 
-- a hash join for the join step
-- a scan on `Customers`
-- an index scan on `Orders` with a pushed date filter
-- a hash aggregation for the `GROUP BY`
-- a sort before the final limit
-
-The optimizer estimates costs and chooses work that reduces processing.
+- A hash join to combine the tables.
+- A sequential scan on the compact `departments` relation.
+- An index scan on `research_project_grants` with an early date filter.
+- A hash aggregate operator for the `GROUP BY` clause.
+- A bounded Top-N sort before emitting the final two records.
 
 ## Common pitfalls
 
 ### Using aliases in the where clause
 
-A column alias created in `SELECT` isn't available in the `WHERE` clause. The
-`WHERE` clause runs before the database resolves the final `SELECT` output.
+A column alias created in `SELECT` is unavailable in the `WHERE` clause. The
+`WHERE` clause executes before the database resolves the final `SELECT` projection.
 
-If you need to filter on an alias, use a nested query or move the predicate into
-`HAVING` when it applies to grouped rows.
+If you need to filter on an alias, use a Common Table Expression or move the
+condition into `HAVING` when it applies to aggregated rows.
 
 ### Putting aggregate filters in the where clause
 
-A `WHERE` clause can't filter on aggregate results such as `SUM(amount) >
-50000`. Those conditions belong in `HAVING`, which runs after aggregation.
+A `WHERE` clause can't filter on aggregate results such as `SUM(amount) > 50000`.
+Those conditions belong in `HAVING`, which evaluates after aggregation completes.
 
 ### Optimizer reordering versus logical order
 
-The logical order shows the semantics of SQL. The optimizer can reorder
-operations to improve performance while preserving the same result.
+The logical order describes query semantics. The optimizer can reorder physical
+operations to improve performance while preserving identical results.
 
-This means a query plan can look different from the SQL order without being
-wrong.
+A query plan can look different from the logical order without being incorrect.
 
 ### Explain versus explain analyze
 
-`EXPLAIN` shows the estimated execution plan. `EXPLAIN ANALYZE` runs the query
-and reports actual runtime metrics.
+`EXPLAIN` displays estimated execution plans without running the query.
+`EXPLAIN ANALYZE` executes the query and reports actual runtime durations,
+memory consumption, and row counts.
 
-Use `EXPLAIN` to inspect the plan shape and `EXPLAIN ANALYZE` to validate real
-performance and row counts.
+Use `EXPLAIN` to inspect query shapes and `EXPLAIN ANALYZE` to validate real
+execution metrics.
 
 ## Key takeaways
 
-- SQL is declarative, but the database still follows a defined evaluation
-  pipeline.
-- The logical order is usually `FROM` to `LIMIT`.
-- The optimizer chooses a physical plan that can reorder work for efficiency.
-- `EXPLAIN` plans help you understand and tune query behavior.
-- A strong understanding of both semantics and execution strategy helps you write
-  better SQL and debug slow queries.
+- `SQL` is declarative, but the database evaluates clauses in a defined sequence.
+- The logical evaluation pipeline progresses from `FROM` through `LIMIT`.
+- The optimizer selects physical operators and access paths that can reorder work
+  for efficiency.
+- `EXPLAIN` plans help you identify bottlenecks and verify index utilization.
+- Understanding semantics and execution planning is critical for diagnosing
+  query performance in production.
 
-Use `EXPLAIN`, `EXPLAIN ANALYZE`, and your database's execution plan reference
-materials to validate query behavior in production.
+## What's next
+
+- Master cost-based query optimization, search-argumentable predicates, and join choices in
+  [Advanced query optimization](/sql/advanced-query-optimization).
+- Explore page layouts, heap files, and write-ahead logging in
+  [Database storage engine internals](/sql/database-storage-engine-internals).
+- Learn B-tree indexing and covering indexes in
+  [Indexing internals](/sql/indexing-internals).

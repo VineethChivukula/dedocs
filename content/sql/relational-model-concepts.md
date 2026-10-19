@@ -1,18 +1,16 @@
 # Relational model concepts
 
-## Overview
-
 The relational model organizes data into structured relations, known as
 tables, and uses mathematical integrity constraints to enforce data
-validity. First formulated in 1970, this model provides the
+validity. First formulated in 1970 by Edgar F. `Codd`, this model provides the
 theoretical foundation for modern relational database management systems,
-including PostgreSQL, MySQL, and SQLite.
+including `PostgreSQL`, `MySQL`, and `SQLite`.
 
 This guide provides a comprehensive reference for relational model concepts.
 It covers mathematical foundations, schema definition constraints, constraint
 violation lifecycle traces, foreign key referential actions, and surrogate
-versus natural key design patterns through concrete datasets and
-before-and-after data states.
+versus natural key design patterns using the canonical Stanford University
+academic schema.
 
 ## Mathematical foundations and relational terminology
 
@@ -20,86 +18,81 @@ In relational theory, a database is a collection of relations governed by
 first-order predicate logic and set theory. Relational database management
 systems translate these formal concepts into practical SQL structures:
 
-| Relational Theory Concept | SQL Implementation | Formal Definition |
+| Relational theory concept | SQL implementation | Formal definition |
 | :--- | :--- | :--- |
-| Relation | Table | An unordered set of tuples sharing identical attributes |
-| Tuple | Row or record | An ordered mapping of attribute names to domain values |
-| Attribute | Column or field | A named property associated with an explicit domain |
-| Domain | Data type | The set of permissible scalar values for an attribute |
-| Degree | Column count | The total number of attributes defining a relation |
-| Cardinality | Row count | The total number of tuples stored in a relation |
+| **Relation** | Table | An unordered set of tuples sharing identical attributes |
+| **Tuple** | Row or record | An ordered mapping of attribute names to domain values |
+| **Attribute** | Column or field | A named property associated with an explicit domain |
+| **Domain** | Data type | The set of permissible scalar values for an attribute |
+| **Degree** | Column count | The total number of attributes defining a relation |
+| **Cardinality** | Row count | The total number of tuples stored in a relation |
 
-Relational operations exhibit closure. Every operation on one or more
-relations evaluates to another relation, which lets queries nest and chain
-indefinitely.
+Relational operations exhibit closure: every operation on one or more relations
+evaluates to another relation, which lets queries nest and chain indefinitely.
 
 ## Integrity constraints taxonomy
 
 Integrity constraints define declarative rules enforced by the database
 engine on every `INSERT`, `UPDATE`, and `DELETE` operation:
 
-- Entity integrity: each tuple in a relation must be uniquely identifiable.
-  A relation must define a primary key, and no attribute participating in the
-  primary key may contain `NULL`.
-- Referential integrity: a foreign key attribute in a child relation must
-  either match an existing primary or candidate key in the referenced parent
-  relation, or contain `NULL`.
-- Domain integrity: attribute values must conform to their assigned data type,
-  character length, and optional `CHECK` range predicates.
-- Semantic integrity: business rules enforced by `UNIQUE` and `NOT NULL`
-  constraints.
+- Entity integrity requires each tuple in a relation to be uniquely identifiable. A relation must define a primary key, and no attribute participating in the primary key may contain a null value.
+- Referential integrity requires a foreign key attribute in a child relation to either match an existing primary key in the referenced parent relation or contain a null value.
+- Domain integrity requires attribute values to conform to their assigned data type, character length, and optional `CHECK` range predicates.
+- Semantic integrity enforces business rules through explicit constraints, such as `UNIQUE` and `NOT NULL`.
 
-## Reference production schema
+## Reference schema for the university scenario
 
-The examples throughout this guide use two interrelated tables, `Departments`
-and `Employees`:
+The examples throughout this guide use two interrelated academic tables,
+`departments` and `instructors`:
 
 ```sql
-CREATE TABLE Departments (
-  DepartmentID   INTEGER PRIMARY KEY,
-  DepartmentCode VARCHAR(10) NOT NULL UNIQUE,
-  DepartmentName VARCHAR(50) NOT NULL
+CREATE TABLE departments (
+    department_id   INT PRIMARY KEY,
+    department_code VARCHAR(10) NOT NULL UNIQUE,
+    department_name VARCHAR(100) NOT NULL,
+    school_name     VARCHAR(100) NOT NULL
 );
 
-CREATE TABLE Employees (
-  EmployeeID    INTEGER PRIMARY KEY,
-  WorkEmail     VARCHAR(100) NOT NULL UNIQUE,
-  FirstName     VARCHAR(50) NOT NULL,
-  LastName      VARCHAR(50) NOT NULL,
-  DepartmentID  INTEGER,
-  Salary        NUMERIC(10, 2) NOT NULL,
-  ManagerID     INTEGER,
-  CONSTRAINT ck_employee_salary
-    CHECK (Salary > 0),
-  CONSTRAINT fk_employee_department
-    FOREIGN KEY (DepartmentID)
-    REFERENCES Departments(DepartmentID)
-    ON DELETE RESTRICT,
-  CONSTRAINT fk_employee_manager
-    FOREIGN KEY (ManagerID)
-    REFERENCES Employees(EmployeeID)
-    ON DELETE SET NULL
+CREATE TABLE instructors (
+    instructor_id        INT PRIMARY KEY,
+    email                VARCHAR(100) NOT NULL UNIQUE,
+    first_name           VARCHAR(50) NOT NULL,
+    last_name            VARCHAR(50) NOT NULL,
+    department_id        INT,
+    salary               DECIMAL(10,2) NOT NULL,
+    mentor_instructor_id INT,
+    academic_rank        VARCHAR(30) NOT NULL,
+    CONSTRAINT ck_instructor_salary
+        CHECK (salary > 0),
+    CONSTRAINT fk_instructor_department
+        FOREIGN KEY (department_id)
+        REFERENCES departments (department_id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_instructor_mentor
+        FOREIGN KEY (mentor_instructor_id)
+        REFERENCES instructors (instructor_id)
+        ON DELETE SET NULL
 );
 ```
 
 ### Initial database state
 
-#### `Departments` table
+#### `departments` table
 
-| DepartmentID | DepartmentCode | DepartmentName |
-| :--- | :--- | :--- |
-| `10` | `SAL` | Sales |
-| `20` | `ENG` | Engineering |
-| `30` | `MKT` | Marketing |
+| `department_id` | `department_code` | `department_name` | `school_name` |
+| :--- | :--- | :--- | :--- |
+| `10` | `CS` | Computer Science | School of Engineering |
+| `20` | `EE` | Electrical Engineering | School of Engineering |
+| `30` | `STATS` | Statistics | School of Humanities and Sciences |
 
-#### `Employees` table
+#### `instructors` table
 
-| EmployeeID | WorkEmail | FirstName | LastName | DepartmentID | Salary | ManagerID |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `101` | `alice@example.com` | Alice | Smith | `10` | `95000.00` | `NULL` |
-| `102` | `bob@example.com` | Bob | Jones | `20` | `72000.00` | `101` |
-| `103` | `charlie@example.com` | Charlie | Brown | `20` | `65000.00` | `101` |
-| `104` | `diana@example.com` | Diana | Prince | `NULL` | `58000.00` | `102` |
+| `instructor_id` | `email` | `first_name` | `last_name` | `department_id` | `salary` | `mentor_instructor_id` | `academic_rank` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `101` | `hennessy@stanford.edu` | John | Hennessy | `10` | `180000.00` | `NULL` | Professor |
+| `102` | `marcus@stanford.edu` | Marcus | Miller | `10` | `145000.00` | `101` | Professor |
+| `103` | `andrea@stanford.edu` | Andrea | Taylor | `20` | `160000.00` | `101` | Professor |
+| `104` | `sarah@stanford.edu` | Sarah | Wilson | `30` | `175000.00` | `NULL` | Professor |
 
 ## Constraint violation lifecycle traces
 
@@ -109,26 +102,29 @@ fails and the engine rolls back all pending changes.
 
 ### Trace 1: primary key uniqueness violation
 
-Consider an attempt to insert a new employee reusing an existing `EmployeeID`:
+Consider an attempt to insert a new instructor reusing existing identifier
+`101`:
 
 ```sql
 -- Fails with primary key violation
-INSERT INTO Employees (
-  EmployeeID,
-  WorkEmail,
-  FirstName,
-  LastName,
-  DepartmentID,
-  Salary,
-  ManagerID
+INSERT INTO instructors (
+    instructor_id,
+    email,
+    first_name,
+    last_name,
+    department_id,
+    salary,
+    mentor_instructor_id,
+    academic_rank
 ) VALUES (
-  101,
-  'alex@example.com',
-  'Alex',
-  'Rivera',
-  10,
-  82000.00,
-  NULL
+    101,
+    'widom@stanford.edu',
+    'Jennifer',
+    'Widom',
+    10,
+    170000.00,
+    NULL,
+    'Professor'
 );
 ```
 
@@ -136,188 +132,193 @@ INSERT INTO Employees (
 
 1. The execution engine parses and plans the `INSERT` statement.
 2. The storage engine checks the unique B-tree index supporting the primary
-   key constraint on `EmployeeID`.
-3. The engine detects an existing index leaf entry for key `101` pointing
-   to Alice's tuple.
+   key constraint on `instructor_id`.
+3. The engine detects an existing index leaf entry for key `101`.
 4. The engine halts execution and raises a duplicate key error:
-   `ERROR: duplicate key value violates unique constraint "Employees_pkey" (Key EmployeeID=101 already exists)`.
+   `ERROR: duplicate key value violates unique constraint "instructors_pkey" (Key instructor_id=101 already exists)`.
 5. The transaction rolls back, preserving table integrity.
 
 ### Trace 2: referential integrity violation
 
-Consider an attempt to assign an employee to a non-existent department:
+Consider an attempt to assign an instructor to a non-existent department `99`:
 
 ```sql
 -- Fails with referential integrity foreign key violation
-INSERT INTO Employees (
-  EmployeeID,
-  WorkEmail,
-  FirstName,
-  LastName,
-  DepartmentID,
-  Salary,
-  ManagerID
+INSERT INTO instructors (
+    instructor_id,
+    email,
+    first_name,
+    last_name,
+    department_id,
+    salary,
+    mentor_instructor_id,
+    academic_rank
 ) VALUES (
-  105,
-  'evan@example.com',
-  'Evan',
-  'Wright',
-  99,
-  61000.00,
-  101
+    105,
+    'ng@stanford.edu',
+    'Andrew',
+    'Ng',
+    99,
+    165000.00,
+    101,
+    'Associate Professor'
 );
 ```
 
 #### Engine evaluation sequence
 
-1. The engine inspects candidate foreign key value `DepartmentID = 99`.
-2. The engine performs an index seek on `Departments.DepartmentID` looking
+1. The engine inspects candidate foreign key value `department_id = 99`.
+2. The engine performs an index seek on `departments.department_id` looking
    for key value `99`.
 3. The seek returns zero matching tuples.
 4. Because the foreign key value is non-null and no corresponding parent
    record exists, referential integrity fails.
 5. The engine raises an integrity error:
-   `ERROR: insert or update on table "Employees" violates foreign key constraint "fk_employee_department"`.
+   `ERROR: insert or update on table "instructors" violates foreign key constraint "fk_instructor_department"`.
 
 ### Trace 3: domain check constraint violation
 
-Consider an attempt to record a negative compensation amount:
+Consider an attempt to record a negative salary amount:
 
 ```sql
 -- Fails with domain CHECK constraint violation
-INSERT INTO Employees (
-  EmployeeID,
-  WorkEmail,
-  FirstName,
-  LastName,
-  DepartmentID,
-  Salary,
-  ManagerID
+INSERT INTO instructors (
+    instructor_id,
+    email,
+    first_name,
+    last_name,
+    department_id,
+    salary,
+    mentor_instructor_id,
+    academic_rank
 ) VALUES (
-  105,
-  'evan@example.com',
-  'Evan',
-  'Wright',
-  10,
-  -5000.00,
-  101
+    105,
+    'ng@stanford.edu',
+    'Andrew',
+    'Ng',
+    10,
+    -5000.00,
+    101,
+    'Associate Professor'
 );
 ```
 
 #### Engine evaluation sequence
 
-1. The engine evaluates the table `CHECK` predicate `Salary > 0` against
+1. The engine evaluates the table `CHECK` predicate `salary > 0` against
    candidate value `-5000.00`.
 2. The comparison `-5000.00 > 0` evaluates to `FALSE`.
 3. Under standard SQL rules, a `CHECK` constraint allows values where the
    expression evaluates to `TRUE` or `UNKNOWN`. It rejects values evaluating
    to `FALSE`.
 4. The engine raises a constraint violation:
-   `ERROR: new row for table "Employees" violates check constraint "ck_employee_salary"`.
+   `ERROR: new row for table "instructors" violates check constraint "ck_instructor_salary"`.
 
 ## Referential actions on parent deletion
 
-When an app deletes a parent row, child rows containing referencing
-foreign keys require explicit resolution. SQL defines four standard
-referential actions:
+When a database client deletes a parent row, child rows containing referencing
+foreign keys require explicit resolution. SQL defines four standard referential
+actions:
 
 ```mermaid
----
-title: Foreign key referential actions
----
 flowchart TD
-    subgraph Actions ["Delete and Update Actions"]
-        direction TB
+    subgraph Actions["Delete and Update Actions"]
         R["RESTRICT or NO ACTION: Cancels deletion if children exist"]
-        C["CASCADE: Recursively deletes all referencing child rows"]
+        C["CASCADE: Recursively deletes referencing child rows"]
         SN["SET NULL: Sets child foreign key columns to NULL"]
-        SD["SET DEFAULT: Sets child foreign key columns to default value"]
+        SD["SET DEFAULT: Resets child foreign key columns to default"]
     end
 ```
 
 ### Comparison of referential actions
 
-Suppose an app issues a command to delete Department `20`, Engineering,
-which employs Bob with ID `102` and Charlie with ID `103`:
+Suppose an administrator issues a command to delete Department `20`,
+Electrical Engineering, which employs instructor Andrea Taylor with ID
+`103`:
 
 ```sql
-DELETE FROM Departments
-WHERE DepartmentID = 20;
+DELETE FROM departments
+WHERE department_id = 20;
 ```
 
 The table below contrasts how each referential action processes this operation:
 
-| Referential Action | Database Behavior | Final State of Child Rows |
+| Referential action | Database behavior | Final state of child rows |
 | :--- | :--- | :--- |
-| `RESTRICT` or `NO ACTION` | Stops immediately | Deletion rejected. Both employees remain in Department `20`. |
-| `CASCADE` | Propagates deletion | Engine deletes Department `20` and automatically deletes Bob and Charlie. |
-| `SET NULL` | Modifies foreign key | Engine deletes Department `20` and updates Bob and Charlie with `DepartmentID = NULL`. |
+| `RESTRICT` or `NO ACTION` | Stops immediately | Deletion rejected. The instructor remains in Department `20`. |
+| `CASCADE` | Propagates deletion | Engine deletes Department `20` and automatically deletes instructor record `103`. |
+| `SET NULL` | Modifies foreign key | Engine deletes Department `20` and updates instructor `103` with `department_id = NULL`. |
 | `SET DEFAULT` | Resets foreign key | Engine deletes Department `20` and updates child foreign keys to the column default. |
 
 ### Concrete state transition with `ON DELETE CASCADE`
 
-If `fk_employee_department` specifies `ON DELETE CASCADE`, deleting
-Department `20` automatically removes Bob and Charlie from `Employees`:
+If `fk_instructor_department` specifies `ON DELETE CASCADE`, deleting
+Department `20` automatically removes instructor `103` from `instructors`:
 
-#### `Employees` table state after cascade deletion
+```sql
+-- Final instructors state after cascade deletion of department 20
+SELECT instructor_id, last_name, department_id 
+FROM instructors;
+```
 
-| EmployeeID | WorkEmail | FirstName | LastName | DepartmentID | Salary | ManagerID |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `101` | `alice@example.com` | Alice | Smith | `10` | `95000.00` | `NULL` |
-| `104` | `diana@example.com` | Diana | Prince | `NULL` | `58000.00` | `NULL` |
-
-Notice that the engine updated Diana's `ManagerID` from `102` to `NULL`
-when it deleted Bob, as `fk_employee_manager` specifies `ON DELETE SET NULL`.
+| `instructor_id` | `last_name` | `department_id` |
+| :--- | :--- | :--- |
+| `101` | Hennessy | `10` |
+| `102` | Miller | `10` |
+| `104` | Wilson | `30` |
 
 ### Concrete state transition with `ON DELETE SET NULL`
 
-If `fk_employee_department` specifies `ON DELETE SET NULL`, deleting
-Department `20` preserves the employee records while nullifying their
-department association:
+If `fk_instructor_department` specifies `ON DELETE SET NULL`, deleting
+Department `20` preserves the instructor record while setting their
+department reference to null:
 
-#### `Employees` table state after set null deletion
+```sql
+-- Final instructors state after set null deletion of department 20
+SELECT instructor_id, last_name, department_id 
+FROM instructors;
+```
 
-| EmployeeID | WorkEmail | FirstName | LastName | DepartmentID | Salary | ManagerID |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `101` | `alice@example.com` | Alice | Smith | `10` | `95000.00` | `NULL` |
-| `102` | `bob@example.com` | Bob | Jones | `NULL` | `72000.00` | `101` |
-| `103` | `charlie@example.com` | Charlie | Brown | `NULL` | `65000.00` | `101` |
-| `104` | `diana@example.com` | Diana | Prince | `NULL` | `58000.00` | `102` |
+| `instructor_id` | `last_name` | `department_id` |
+| :--- | :--- | :--- |
+| `101` | Hennessy | `10` |
+| `102` | Miller | `10` |
+| `103` | Taylor | `NULL` |
+| `104` | Wilson | `30` |
 
 ## Natural keys versus surrogate keys
 
 Choosing candidate keys to serve as the relation primary key involves
 evaluating trade-offs between business semantics and schema stability:
 
-- Natural key: an attribute whose value exists in the real-world business
-  domain, such as a Tax Identification Number, email address, or vehicle
-  identification number.
-- Surrogate key: an artificial identifier generated by the database system,
-  such as an auto-incrementing integer or universally unique identifier
-  `UUID`, with no intrinsic business meaning.
+- A natural key is an attribute whose value exists in the real-world business domain, such as a student email address or universal institutional code.
+- A surrogate key is an artificial identifier generated by the database system (such as an auto-incrementing integer or universally unique identifier `UUID`) with no intrinsic business meaning.
 
 ### Architectural trade-off analysis
 
-| Architectural Dimension | Natural Key Design | Surrogate Key Design |
+| Architectural dimension | Natural key design | Surrogate key design |
 | :--- | :--- | :--- |
-| Storage efficiency | May require wide string storage across foreign keys | Compact fixed-width integers or 16-byte `UUID` values |
-| Business rule volatility | High risk: real-world identifier changes require cascading updates | Zero risk: artificial keys never change across business lifecycle |
-| Query join performance | Joins on wide strings consume more buffer pool memory | Joins on compact integer keys optimize CPU cache alignment |
-| Accidental duplication | Enforces business uniqueness inherently on the primary key | Requires explicit supplementary `UNIQUE` constraint on business column |
+| **Storage efficiency** | May require wide string storage across foreign keys | Compact fixed-width integers or 16-byte `UUID` values |
+| **Business rule volatility** | High risk: real-world identifier changes require cascading updates | Zero risk: artificial keys never change across business lifecycle |
+| **Query join performance** | Joins on wide strings consume more buffer pool memory | Joins on compact integer keys optimize CPU cache alignment |
+| **Accidental duplication** | Enforces business uniqueness inherently on the primary key | Requires an explicit supplementary `UNIQUE` constraint on business column |
 
 The recommended pattern combines both approaches: use a compact surrogate key
 as the physical primary key to optimize joins and index storage, while enforcing
 a `UNIQUE NOT NULL` constraint on the natural business identifier:
 
 ```sql
-CREATE TABLE Customers (
-  CustomerID   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  TaxNumber    VARCHAR(32) NOT NULL UNIQUE,
-  CompanyName  VARCHAR(100) NOT NULL
+CREATE TABLE students (
+    student_key  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    student_id   VARCHAR(20)  NOT NULL UNIQUE, -- Natural institutional identifier
+    full_name    VARCHAR(100) NOT NULL,
+    email        VARCHAR(100) NOT NULL UNIQUE
 );
 ```
 
 ## Common pitfalls
+
+When designing relational tables, watch for these common mistakes:
 
 ### Missing indexes on child foreign key columns
 
@@ -334,26 +335,26 @@ Without an index on the child foreign key column:
 Always build a supporting index on child foreign key columns:
 
 ```sql
-CREATE INDEX idx_employees_department_id
-  ON Employees(DepartmentID);
+CREATE INDEX idx_instructors_department_id
+  ON instructors(department_id);
 ```
 
-### Divergent `NULL` semantics in unique constraints
+### Divergent null semantics in unique constraints
 
-Database engines differ in how they evaluate `NULL` values within `UNIQUE`
+Database engines differ in how they evaluate null values within `UNIQUE`
 constraints:
 
-- PostgreSQL, SQLite, and Oracle: multiple rows may contain `NULL` in a
-  single-column unique constraint because `NULL <> NULL` under three-valued
-  logic.
-- SQL Server: traditionally treats `NULL` as a distinct value, permitting
-  only one row with `NULL` under a standard unique constraint.
+- `PostgreSQL`, `SQLite`, and `Oracle`: multiple rows may contain null values in
+  a single-column unique constraint because null doesn't equal null under
+  three-valued logic.
+- SQL Server: traditionally treats null as a distinct value, permitting only
+  one row with a null value under a standard unique constraint.
 
 When a column must be unique and present on every record, declare both
 `NOT NULL` and `UNIQUE`:
 
 ```sql
-WorkEmail VARCHAR(100) NOT NULL UNIQUE
+email VARCHAR(100) NOT NULL UNIQUE
 ```
 
 ### Unintended orphan records from foreign keys allowing nulls
@@ -361,23 +362,17 @@ WorkEmail VARCHAR(100) NOT NULL UNIQUE
 Declaring a foreign key column without `NOT NULL` allows rows to exist
 without any association to a parent record.
 
-While valid for optional relationships, such as an employee without a
-department, foreign keys that permit null values cause child records to
-disappear from standard inner join query results. When every child record
-must strictly belong to a parent entity, declare the foreign key column
-as `NOT NULL`.
+While valid for optional relationships, such as an instructor without an
+assigned department, foreign keys that permit null values cause child records to
+disappear from standard inner join query results. When every child record must
+strictly belong to a parent entity, declare the foreign key column as
+`NOT NULL`.
 
-## Key takeaways
+## What's next
 
-- Relational databases enforce entity integrity through primary keys and
-  referential integrity through foreign keys.
-- Constraint checks cancel transactions and roll back pending state changes
-  when predicates evaluate to `FALSE`.
-- Select referential actions like `RESTRICT`, `CASCADE`, or `SET NULL` based on
-  child entity lifecycle dependencies.
-- Pair surrogate primary keys with unique constraints on natural business
-  attributes to balance join performance with domain integrity.
-- Index foreign key columns explicitly in child tables to prevent full table
-  scans and lock contention during parent record deletions.
-- Enforce both `NOT NULL` and `UNIQUE` when an attribute must remain distinct
-  across every stored tuple.
+- Learn basic querying, column selection, and predicates in
+  [Basic querying and filtering](/sql/basic-querying-and-filtering).
+- Master inner, outer, and anti-semi-joins in
+  [Fundamental joins](/sql/fundamental-joins).
+- Understand normalization rules and functional dependencies in
+  [Database normalization](/modeling/database-normalization).

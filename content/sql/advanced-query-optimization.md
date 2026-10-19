@@ -1,261 +1,258 @@
-﻿# Advanced query optimization
+# Advanced query optimization
 
 ## Overview
 
-Query optimization turns a declarative SQL statement into the most efficient
-physical execution plan. The optimizer evaluates many possible access paths,
-join strategies, and filter placements to reduce disk I/O, memory use, and
-network traffic.
+Query optimization transforms a declarative Structured Query Language, or `SQL`,
+statement into an efficient physical execution plan. The query optimizer
+evaluates alternative access paths, join strategies, and filter placements to
+reduce disk I/O, memory consumption, and network traffic.
 
-This guide introduces the main optimization patterns that affect query
-performance in relational and distributed systems.
+This guide introduces core optimization mechanisms that govern query performance
+in relational database engines using the Stanford University student enrollment
+database.
 
-## Predicate push down
+## Predicate push-down
 
-Predicate push down moves filtering conditions as early as possible in the
-execution plan. The database applies the predicate close to the scan or storage
-layer instead of waiting to read a larger intermediate result.
+Predicate push-down moves filtering conditions as early as possible in the
+execution pipeline. The database applies the filter directly at the storage scan
+layer instead of reading and materializing unneeded intermediate rows.
 
 ```mermaid
----
-title: Predicate Push Down Optimization
----
 flowchart TD
-    subgraph WithoutPD ["Without Predicate Push Down (Late Filtering)"]
+    subgraph WithoutPD ["Without predicate push-down: late filtering"]
         direction TD
-        A1["Disk / Storage Layer"] -->|"Read All Rows<br/>(1,000,000 records)"| B1["Query Processing Engine"]
-        B1 -->|"Pass Unfiltered Intermediate Set"| C1["Filter Operator"]
-        C1 -->|"Evaluate WHERE Condition Late"| D1["Final Result Set<br/>(10,000 records)"]
+        A1["Storage layer"] -->|"Read all rows: 1,000,000 records"| B1["Query processing engine"]
+        B1 -->|"Pass unfiltered intermediate set"| C1["Filter operator"]
+        C1 -->|"Evaluate WHERE condition late"| D1["Final result set: 10,000 records"]
     end
 
-    subgraph WithPD ["With Predicate Push Down (Early Filtering)"]
+    subgraph WithPD ["With predicate push-down: early filtering"]
         direction TD
-        A2["Disk / Storage Layer"] -->|"Apply Filter at Scan/Connector<br/>(OrderDate >= '2025-01-01')"| B2["Filtered Storage Scan"]
-        B2 -->|"Read Only Matching Rows<br/>(10,000 records)"| C2["Query Processing Engine"]
-        C2 -->|"Direct Processing (No Wasted I/O)"| D2["Final Result Set<br/>(10,000 records)"]
+        A2["Storage layer"] -->|"Apply filter at scan: enrollment_date >= '2025-01-01'"| B2["Filtered storage scan"]
+        B2 -->|"Read only matching rows: 10,000 records"| C2["Query processing engine"]
+        C2 -->|"Direct processing without wasted I/O"| D2["Final result set: 10,000 records"]
     end
 ```
 
-When the database applies the predicate early, it can discard rows before it
-builds large intermediate result sets. This reduces memory pressure and avoids
-wasted network and CPU work.
+When the database evaluates predicates early, it discards non-matching rows before
+constructing large intermediate result sets. This minimizes memory buffer
+pressure and eliminates wasted CPU cycles.
 
-### Why it matters
+### Why predicate push-down matters
 
-Predicate push down works well when the engine can apply a condition near the
-storage layer. Examples include filtering rows in a storage engine, a
-connector, or a file scan step before the data reaches the query processing
-layer.
+Predicate push-down succeeds when the engine can delegate a condition directly
+to the underlying storage engine, index scanner, or connector before records
+reach the query processing layer.
 
-This pattern often improves performance for queries such as:
+This optimization pattern accelerates queries with filters such as:
 
-- `WHERE order_date >= '2025-01-01'`
-- `WHERE account_status = 'ACTIVE'`
-- `WHERE region = 'North'`
+- `WHERE enrollment_date >= '2025-01-01'`
+- `WHERE academic_standing = 'ACTIVE'`
+- `WHERE department_id = 10`
 
 ### Benefits
 
-- fewer rows move through the plan
-- lower memory and CPU overhead
-- less data transferred across engines or nodes
-- better use of indexes and scan pruning
+- Fewer tuples traverse the execution pipeline.
+- Lower memory consumption and CPU overhead.
+- Reduced data transfer volumes across distributed nodes.
+- Improved index scan pruning and partition elimination.
 
-## Index scans versus sequential scans
+## Index scans compared with sequential scans
 
-When the engine reads a table, it chooses an access path. The two main options
-are a sequential scan and an index scan.
+When reading records from a table, the query engine selects an access path.
+The two primary options are a sequential scan and an index scan.
 
 ### Sequential scan
 
-A sequential scan reads rows in page order. It works well when the query needs
-a large fraction of the table or when the table is small enough that a full
-pass costs less than index access.
+A sequential scan reads table pages in physical disk order. It works well when
+a query requests a large fraction of the table or when the table is small enough
+that a complete sequential read costs less than random index access.
 
 ### Index scan and seek
 
-An index scan or index seek uses a B-tree or a similar structure to find rows
-that match a predicate. This approach reduces the amount of data the engine
-reads when the predicate is selective.
+An index scan or index seek navigates a B-tree or similar index structure to
+locate tuples matching a filter predicate. This strategy reduces read volume
+when predicates are highly selective.
 
 | Dimension | Sequential scan | Index scan or seek |
-| --- | --- | --- |
-| Access pattern | contiguous I/O | tree traversal with targeted reads |
-| Data selectivity | low selectivity with many matching rows | high selectivity with few matching rows |
-| Lookup speed | linear scan | logarithmic search |
-| Memory and cache use | can stream large amounts of data | usually lower memory use for narrow access |
+| :--- | :--- | :--- |
+| **Access pattern** | Contiguous physical I/O | Tree traversal with targeted page reads |
+| **Data selectivity** | Low selectivity with many matching rows | High selectivity with few matching rows |
+| **Lookup complexity** | Linear scan: $O(N)$ | Logarithmic search: $O(\log N)$ |
+| **Memory utilization** | Streams large page buffers | Concentrates cache on active tree nodes |
 
-### When to choose each approach
+### When to choose each access path
 
 Choose a sequential scan when:
 
-- the table is small
-- the query needs a large fraction of the table
-- the optimizer estimates that a full table read costs less than index access
+- The table occupies few physical disk pages.
+- The query needs a large percentage of table records.
+- The optimizer calculates that a sequential read costs less than random index access.
 
 Choose an index scan when:
 
-- a predicate is highly selective
-- the query filters on a narrow key range
-- the engine can fetch only the required rows
+- A filter predicate is highly selective.
+- The query filters on a narrow key range.
+- The engine can satisfy projections directly through a covering index.
 
 ## Join algorithms
 
-When a query combines data from multiple tables, the optimizer chooses a join
-strategy. The right choice depends on table size, sort order, memory, and the
-predicate type.
+When a query combines data from multiple relations, the optimizer selects a join
+strategy based on row counts, sort orders, available buffer memory, and
+predicate operators.
 
-| Join algorithm | Typical strength | Typical use case |
-| --- | --- | --- |
-| Nested loop join | good for small outer tables | selective access and index-assisted joins |
-| Hash join | good for large unsorted inputs | large equality joins |
-| Merge join | good for sorted inputs | ordered joins and pre-sorted streams |
+| Join algorithm | Primary operational strength | Typical use case |
+| :--- | :--- | :--- |
+| **Nested loop join** | Efficient for small outer row sets | Highly selective searches and index-assisted joins |
+| **Hash join** | Scalable for large unsorted inputs | Large equality join comparisons |
+| **Merge join** | High throughput for sorted streams | Ordered joins and pre-sorted index inputs |
 
 ### Nested loop join
 
-A nested loop join iterates through rows from one input and probes the other
-input for matching rows. This approach works well when the outer row set is
-small and the inner side has an index.
+A nested loop join scans rows from an outer input relation and executes a search
+against the inner input relation for each outer row. This algorithm is optimal
+when the outer relation contains few tuples and the inner relation provides a
+supporting index on the join key.
 
 ### Hash join
 
-A hash join builds an in-memory or on-disk hash table from one side of the join
-and probes it with rows from the other side. This approach works well for large
-joins where the predicate is equality-based and the inputs aren't already
-sorted.
+A hash join reads the smaller relation to construct an in-memory hash table keyed
+on join attributes. The engine then scans the larger relation, probing the hash
+table for matching tuples. This algorithm operates efficiently on large, unsorted
+datasets with equality join predicates.
 
 ### Merge join
 
-A merge join works well when both inputs sort on the join key. It streams
-through both inputs and emits matches in order without building a large hash
-structure.
+When both input streams arrive sorted by the join key, a merge join provides
+exceptional performance. The engine reads both sorted streams simultaneously,
+advancing pointers, and emitting matches without constructing an in-memory hash
+table.
 
-### Join choice considerations
+### Join algorithm selection criteria
 
-The optimizer compares estimated cost and chooses a join algorithm based on:
+The optimizer estimates query costs and chooses a join algorithm by evaluating:
 
-- row counts
-- available memory
-- sort order
-- index availability
-- join predicate type
+- Cardinality estimates and row counts.
+- Available buffer pool and work memory.
+- Existing sort orders and index availability.
+- Join predicate comparison operators.
 
 ## Complete example
 
-Consider an e-commerce query that returns customer purchases for 2025.
+Consider a query analyzing active student course enrollments for the 2025
+academic year:
 
 ```sql
 SELECT
-  c.CustomerName,
-  o.OrderID,
-  o.OrderAmount
-FROM Customers c
-JOIN Orders o
-  ON c.CustomerID = o.CustomerID
-WHERE o.OrderDate >= '2025-01-01'
-  AND c.AccountStatus = 'ACTIVE';
+  s.first_name,
+  s.last_name,
+  e.enrollment_id,
+  e.course_id
+FROM students AS s
+JOIN course_enrollments AS e
+  ON s.student_id = e.student_id
+WHERE e.enrollment_date >= '2025-01-01'
+  AND s.academic_standing = 'ACTIVE';
 ```
 
-The optimizer can choose a plan that applies filtering and join work in a
-cost-aware order. A representative plan looks like this:
+The optimizer constructs a cost-effective plan that applies filters early and
+selects an optimal join operator:
 
 ```mermaid
----
-title: Practical Query Execution Plan Tree
-config:
-  layout: elk
----
 flowchart BT
-    %% Storage Access Layer
-    subgraph StorageLayer ["Physical Access Layer"]
+    subgraph StorageLayer ["Physical access layer"]
         direction LR
-        CustScan["<b>Seq Scan on Customers (c)</b><br/>Filter: AccountStatus = 'ACTIVE'<br/><i>(Predicate pushed down early)</i>"]
-        OrdScan["<b>Index Scan on Orders (o)</b><br/>Index: idx_order_date<br/>Filter: OrderDate >= '2025-01-01'"]
+        StudentScan["Seq scan on students s: filter academic_standing = 'ACTIVE'"]
+        EnrollmentScan["Index scan on course_enrollments e: filter enrollment_date >= '2025-01-01'"]
     end
 
-    %% Join Phase
-    HashJoin["<b>Hash Join</b><br/>Join Key: c.CustomerID = o.CustomerID"]
+    HashJoin["Hash join: join key s.student_id = e.student_id"]
+    FinalOutput["Final result set: first_name, last_name, enrollment_id, course_id"]
 
-    %% Final Result
-    FinalOutput["<b>Final Query Result Set</b><br/>Columns: CustomerName, OrderID, OrderAmount"]
-
-    %% Data Pipeline Connections
-    CustScan -->|"Filtered Active Customers<br/>(Build Input)"| HashJoin
-    OrdScan -->|"Filtered 2025 Orders<br/>(Probe Input)"| HashJoin
-    HashJoin -->|"Joined Data Stream"| FinalOutput
-
-    %% Styling
-    style StorageLayer fill:none,stroke:none
-    style FinalOutput fill:#166534,stroke:#22c55e,color:#fff
-    style HashJoin fill:#1e3a8a,stroke:#3b82f6,color:#fff
+    StudentScan -->|"Filtered active students: build input"| HashJoin
+    EnrollmentScan -->|"Filtered 2025 enrollments: probe input"| HashJoin
+    HashJoin -->|"Joined record stream"| FinalOutput
 ```
 
-This example shows several optimization ideas:
+This plan demonstrates several optimization principles:
 
-- the optimizer can filter the `Customers` table before the join
-- the `Orders` table can use an index on `OrderDate`
-- the join can use a hash join instead of a nested loop join
-- the optimizer can reduce rows before the join completes
+- The engine evaluates `s.academic_standing = 'ACTIVE'` directly during the scan
+  of `students`.
+- The engine uses an index on `enrollment_date` to prune non-matching enrollment
+  records.
+- The optimizer chooses a hash join, building the hash table on the smaller,
+  filtered `students` dataset.
+- The engine filters records before executing the join operator, minimizing
+  joined tuple volume.
 
-### Step-by-step optimizer workflow
+### Optimizer evaluation lifecycle
 
-1. Parse the SQL syntax and bind names to real tables and columns.
-2. Build a logical plan that represents the required join and filters.
-3. Estimate row counts and selectivity for each predicate.
-4. Choose access paths, such as a sequential scan, an index scan, or a seek.
-5. Choose the join algorithm that minimizes overall cost.
-6. Produce the physical plan and execute it.
-
-This sequence is the core of advanced query optimization.
+1. **Syntax parsing and semantic binding**: verifies query grammar and resolves
+   attribute names against catalog metadata.
+2. **Logical plan generation**: constructs an initial operator tree representing
+   requested joins, projections, and filters.
+3. **Cardinality and selectivity estimation**: consults table statistics to estimate
+   intermediate row volumes.
+4. **Access path evaluation**: compares costs between sequential page scans and
+   index traversals.
+5. **Join order and algorithm enumeration**: evaluates permutations of nested loops,
+   hash joins, and merge joins to find the lowest-cost execution tree.
+6. **Physical plan compilation**: translates the chosen logical operators into
+   executable engine iterators.
 
 ## Common pitfalls
 
-### Predicate push down isn't always possible
+### Predicate push-down limitations
 
-The optimizer can't always move a predicate near the storage layer. It depends
-on the database engine, connector capabilities, and how the optimizer rewrites
-the expression. Complex expressions, function calls, and row-level processing can
-limit early filtering opportunities.
+The optimizer can't always push predicates down to the storage scan layer.
+Complex expressions, non-deterministic functions, and user-defined operations can
+create optimization fences that force the engine to evaluate filters late in the
+pipeline.
 
-### Access path estimation can be wrong
+### Inaccurate access path estimation
 
-The optimizer chooses between a sequential scan and an index scan based on
-estimates such as row counts, data distribution, and index selectivity. A table
-scan can still be the cheapest option, and an index isn't always the right
-choice. The cost model decides the final plan.
+The optimizer selects between sequential scans and index traversals based on
+selectivity estimates. If an index predicate matches a large fraction of table
+rows, random disk page seeks can exceed the cost of a sequential scan.
 
-### Missing or stale statistics
+### Stale table statistics
 
-The optimizer relies on statistics to estimate row counts and cost. If the
-statistics are stale or absent, it can choose a poor plan even when the SQL is
-correct.
+Cost-based optimizers depend on accurate table statistics. If statistics become
+stale, the optimizer can miscalculate row counts, resulting in suboptimal
+join orders and inappropriate access paths. Run `ANALYZE` regularly after bulk
+data modifications.
 
-### Overusing broad filters
+### Broad or non-sargable filters
 
-Even a correct filter can be expensive if it runs late in the plan. Early
-filtering reduces cost substantially.
+Wrapping indexed columns inside functions, such as `WHERE YEAR(enrollment_date) = 2025`,
+prevents the optimizer from using index seeks. Rephrase predicates into
+search-argument-compatible expressions: `WHERE enrollment_date >= '2025-01-01' AND enrollment_date < '2026-01-01'`.
 
-### Choosing the wrong join strategy
+### Unsuitable join algorithms for skewed data
 
-A nested loop join can work well for a small lookup, but it can become slow for
-large data sets. Hash joins and merge joins can outperform it for larger
-inputs.
-
-### Ignoring data distribution
-
-The optimizer estimates cost based on data distribution, not only on the query
-text. Data skew, duplicate keys, and unexpected cardinality can change the
-execution plan.
+A nested loop join can execute rapidly for a single point lookup, but performance
+degrades severely when applied to large outer relations. Conversely, hash joins
+require sufficient memory to prevent spooling hash partitions to temporary disk
+storage.
 
 ## Key takeaways
 
-- Query optimization turns declarative SQL into an efficient physical plan.
-- Early filtering reduces the amount of data that the engine needs to process.
-- The optimizer chooses between sequential scans and index scans based on
-  selectivity and cost.
-- Join algorithm choice depends on table size, sort order, memory, and predicate
-  type.
-- Execution plans and optimizer statistics are essential tools for diagnosing
-  slow queries.
+- Query optimization translates declarative `SQL` into an efficient physical
+  plan.
+- Early predicate push-down minimizes intermediate row volumes and reduces
+  memory consumption.
+- The optimizer balances sequential scans against index scans based on estimated
+  selectivity and page access costs.
+- Join algorithm selection depends on relation row counts, memory limits,
+  sort orders, and predicate types.
+- Maintain accurate catalog statistics so the cost-based optimizer can evaluate
+  reliable execution plans.
 
-The exact behavior varies by database engine, but the optimization principles
-remain consistent across systems.
+## What's next
+
+- Explore data modeling tiers and conceptual-to-physical schemas in
+  [Data modeling fundamentals](/modeling/data-modeling-fundamentals).
+- Master functional dependencies and normal forms in
+  [Database normalization](/modeling/database-normalization).
+- Review database storage architectures and slotted pages in
+  [Database storage engine internals](/sql/database-storage-engine-internals).

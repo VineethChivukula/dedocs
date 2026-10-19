@@ -10,7 +10,7 @@ The micro syllabus is designed to provide a structured learning path for aspirin
 | ---- | --------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------- | ----------- |
 | I    | Relational Model Concepts: Tables, Rows, Columns, Primary Keys, Foreign Keys, Unique Constraints, NOT NULL                  | [T5]      | 1                     | 1–14        |
 | I    | Basic Querying & Filtering: SELECT, WHERE, AND/OR/NOT, BETWEEN, IN, LIKE pattern matching                                   | [T5]      | 1                     | 15–28       |
-| I    | Basic Aggregations & Grouping: COUNT(), SUM(), AVG(), MIN(), MAX(), GROUP BY, HAVING clause mechanics                       | [T5]      | 2                     | 30–45       |
+| I    | Basic Aggregations & Grouping: COUNT(), SUM(), AVG(), MIN(), MAX(), GROUP BY, HAVING clause filters                         | [T5]      | 2                     | 30–45       |
 | I    | Fundamental Joins: Inner Joins, Left Outer, Right Outer, Full Outer, Cross Joins, Self Joins                                | [T5]      | 4                     | 120–135     |
 | I    | Conditional Logic & NULL Handling: CASE WHEN, COALESCE(), NULLIF(), Three-Valued Logic (TRUE, FALSE, UNKNOWN)               | [T5]      | 3                     | 80–95       |
 | I    | Subqueries & Set Operations: Scalar Subqueries, Correlated Subqueries, EXISTS vs IN, UNION, UNION ALL, INTERSECT, EXCEPT    | [T5]      | 4                     | 136–150     |
@@ -25,7 +25,7 @@ The micro syllabus is designed to provide a structured learning path for aspirin
 | I    | Advanced Query Optimization: Predicate pushdown, Index scanning vs Sequential scans, Nested Loop vs Hash Join vs Merge Join | [T2]      | 3                     | 111–125     |
 | II   | Fundamentals of Data Modeling: Conceptual, Logical, Physical Data Models, Entity-Relationship (ER) Diagrams                 | [T1]      | 1                     | 1–15        |
 | II   | Entities, Attributes & Relationships: 1:1, 1:N, M:N entity relationships and Junction/Bridge tables                         | [T1]      | 1                     | 16–25       |
-| II   | Database Normalization Mechanics: Insertion, Deletion, Update Anomalies, 1NF, 2NF, 3NF, BCNF, Denormalization               | [T5]      | App. A                | 500–515     |
+| II   | Database Normalization: Insertion, Deletion, Update Anomalies, 1NF, 2NF, 3NF, BCNF, Denormalization                         | [T5]      | App. A                | 500–515     |
 | II   | Dimensional Modeling Methodology: Kimball Dimensional Modeling vs. Inmon Enterprise Data Warehouse (EDW) top-down           | [T1]      | 1                     | 26–35       |
 | II   | Schema Architectures: Star Schema vs. Snowflake Schema vs. Wide Denormalized Tables (Performance vs Storage)                | [T1]      | 2                     | 40–48       |
 | II   | Fact Table Design & Types: Transaction Fact Tables, Periodic Snapshot Facts, Accumulating Snapshot Facts                    | [T1]      | 1                     | 36–45       |
@@ -60,13 +60,13 @@ The micro syllabus is designed to provide a structured learning path for aspirin
 | IV   | Sharding & Replication Patterns: Range/Hash Sharding, Consistent Hashing, Single/Multi-Leader & Leaderless Replication      | [T2]      | 5                     | 151–215     |
 | IV   | Governance, Quality & System Design: Data Lineage, Schema Contracts, Great Expectations, PII Hashing, System Design         | [T6]      | 4                     | 91–110      |
 | V    | Complexity Analysis: Time & Space Complexity (Big-O, Big-Omega, Big-Theta), Auxiliary Space analysis                        | [T4]      | VI                    | 38–50       |
-| V    | Python Built-in Data Structures: Lists (Dynamic Arrays), Dicts, Sets, Tuples internal complexities & mechanics              | [T4]      | 1                     | 75–87       |
+| V    | Python Built-in Data Structures: Lists (Dynamic Arrays), Dicts, Sets, Tuples internal complexities & memory layouts         | [T4]      | 1                     | 75–87       |
 | V    | Arrays & Strings Algorithms: Two-Pointer Technique, Sliding Window Patterns (Fixed/Variable), Hash Map lookups              | [T4]      | 1                     | 88–95       |
 | V    | Linked Lists Algorithms: Singly/Doubly Linked Lists, Fast & Slow Pointer (Floyd's Cycle Detection, Middle Element)          | [T4]      | 2                     | 92–95       |
-| V    | Stacks & Queues: LIFO/FIFO Mechanics, Monotonic Stacks (Next Greater Element), Deque implementations                        | [T4]      | 3                     | 96–99       |
+| V    | Stacks & Queues: LIFO and FIFO Operations, Monotonic Stacks (Next Greater Element), Deque implementations                   | [T4]      | 3                     | 96–99       |
 | V    | Sorting & Searching Algorithms: Quicksort, Merge Sort, Binary Search and boundary variations (Lower/Upper Bound)            | [T4]      | 10                    | 146–155     |
 | V    | Trees & Hierarchical Structures: Binary Search Trees (BST), Tree Traversals (BFS, DFS, Level-order), BST Validation         | [T4]      | 4                     | 100–110     |
-| V    | Heaps & Priority Queues: Min-Heap / Max-Heap mechanics, Top-K Frequent Problems, Merge K Sorted Lists                       | [T4]      | 4                     | 126–135     |
+| V    | Heaps & Priority Queues: Min-Heap / Max-Heap Operations, Top-K Frequent Problems, Merge K Sorted Lists                      | [T4]      | 4                     | 126–135     |
 | V    | Graph Algorithms: Adjacency List/Matrix, BFS, DFS, Topological Sorting (Kahn's Algorithm) for DAG execution ordering        | [T4]      | 4                     | 111–125     |
 | V    | Advanced Patterns for DE: Hash Maps & Frequency Buckets, Interval Merging, LRU Cache implementation, Trie                   | [T4]      | 11                    | 176–190     |
 
