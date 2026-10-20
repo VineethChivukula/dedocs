@@ -145,20 +145,10 @@ export default defineConfig({
               text: "Primary and key management",
               link: "/modeling/primary-and-key-management",
             },
-            //       ],
-            //     },
-            //     {
-            //       text: "Warehouse & Lakehouse",
-            //       items: [
-            //         {
-            //           text: "Fact & Dimension Patterns",
-            //           link: "/modeling/facts-and-dimensions",
-            //         },
-            //         {
-            //           text: "Slowly Changing Dimensions (SCD)",
-            //           link: "/modeling/scd-patterns",
-            //         },
-            //         { text: "Lakehouse Architectures", link: "/modeling/lakehouse" },
+            {
+              text: "Slowly changing dimensions core",
+              link: "/modeling/slowly-changing-dimensions-core"
+            },
           ],
         },
       ],

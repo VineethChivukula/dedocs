@@ -57,3 +57,4 @@ overcounting
 unary
 hoc
 (?i)uuid(s)?
+(?i)minidimension(s)?
