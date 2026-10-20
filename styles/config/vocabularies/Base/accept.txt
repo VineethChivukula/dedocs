@@ -58,3 +58,6 @@ unary
 hoc
 (?i)uuid(s)?
 (?i)minidimension(s)?
+(?i)rollup(s)?
+(?i)walkthrough(s)?
+(?i)backfill(s|ing)?

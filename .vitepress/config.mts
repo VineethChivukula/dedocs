@@ -149,6 +149,10 @@ export default defineConfig({
               text: "Slowly changing dimensions core",
               link: "/modeling/slowly-changing-dimensions-core"
             },
+            {
+              text: "Advanced SCD patterns",
+              link: "/modeling/advanced-scd-patterns"
+            },
           ],
         },
       ],
