@@ -153,6 +153,10 @@ export default defineConfig({
               text: "Advanced SCD patterns",
               link: "/modeling/advanced-scd-patterns"
             },
+            {
+              text: "Modern lakehouse architecture",
+              link: "/modeling/modern-lakehouse-architecture"
+            },
           ],
         },
       ],
